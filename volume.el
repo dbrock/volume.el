@@ -1,5 +1,7 @@
 ;;; volume.el --- tweak your sound card volume from Emacs
 ;; Copyright (C) 2005  Daniel Brockman
+;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
+;;   Free Software Foundation, Inc.
 
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
@@ -96,6 +98,7 @@ See the variable `volume-backend'."
 
 (defvar volume-aumix-backend
   '((get . volume-aumix-get)
+    (set . volume-aumix-set)
     (nudge . volume-aumix-nudge)))
 
 (defgroup volume-aumix nil
@@ -132,19 +135,24 @@ If OUTPUT cannot be parsed, raise an error."
   "Return the current volume, using aumix to get it."
   (volume-aumix-parse-output (volume-aumix-call "-vq")))
 
-(defun volume-aumix-nudge (amount)
-  "Use aumix to change the volume by AMOUNT percentage units.
-Return the new volume, in percent."
+(defun volume-aumix-set (n)
+  "Use aumix to set the current volume to N percent."
   (volume-aumix-parse-output
-   (volume-aumix-call (concat "-v" (if (>= amount 0) "+" "-")
-                              (number-to-string (abs amount)))
-                      "-vq")))
+   (volume-aumix-call (format "-v%d" n) "-vq")))
+
+(defun volume-aumix-nudge (n)
+  "Use aumix to change the volume by N percentage units.
+Return the new volume, in percent."
+  (let ((sign (if (>= n 0) "+" "-")))
+    (volume-aumix-parse-output
+     (volume-aumix-call (format "-v%s%d" sign (abs n)) "-vq"))))
 
 
 ;;;; The amixer backend
 
 (defvar volume-amixer-backend
   '((get . volume-amixer-get)
+    (set . volume-amixer-set)
     (nudge . volume-amixer-nudge)))
 
 (defgroup volume-amixer nil
@@ -197,31 +205,42 @@ If OUTPUT cannot be parsed, raise an error."
   (volume-amixer-parse-output
    (volume-amixer-call "get" volume-amixer-control)))
 
-(defun volume-amixer-nudge (amount)
-  "Use amixer to change the volume by AMOUNT percentage units."
+(defun volume-amixer-set (n)
+  "Use amixer to set the current volume to N percent."
   (volume-amixer-call "set" volume-amixer-control
-                      (concat (number-to-string (abs amount))
-                              (if (>= amount 0) "+" "-"))))
+                      (format "%d%%" n)))
+
+(defun volume-amixer-nudge (amount)
+  "Use amixer to change the volume by N percentage units."
+  (let ((sign (if (>= n 0) "+" "-")))
+    (volume-amixer-call "set" volume-amixer-control
+                        (format "%s%d" sign (abs n)))))
 
 
 ;;;; User interface
 
 (defun volume-get ()
-  "Return the current volume, in percent."
+  "Return the current volume in percent."
   (volume-backend-call 'get))
 
-(defun volume-nudge (amount)
-  "Change the volume by AMOUNT percentage units.
+(defun volume-set (n)
+  "Set the volume to N percent."
+  (volume-backend-call 'set n))
+
+(defun volume-nudge (n)
+  "Change the volume by N percentage units.
 Return either the new volume or nil, depending on the backend."
-  (volume-backend-call 'nudge amount))
+  (volume-backend-call 'nudge n))
 
 (defun volume-show (&optional volume)
-  "Display the current volume in the minibuffer."
+  "Display the current volume in the minibuffer.
+If VOLUME is non-nil, take that to be the current volume."
   (interactive)
   (message "Volume: %d%%" (or volume (volume-get))))
 
-(defun volume-update (&optional volume)
-  "Update the Volume buffer to reflect the current volume."
+(defun volume-redisplay (&optional volume)
+  "Update the Volume buffer to reflect the current volume.
+If VOLUME is non-nil, take that to be the current volume."
   (interactive)
   (when (null volume)
     (setq volume (volume-get)))
@@ -231,7 +250,7 @@ Return either the new volume or nil, depending on the backend."
     (insert "Volume: ")
     (let* ((bar-start (point))
            (available-width (- (window-width) bar-start))
-           (bar-width (round (* (/ volume 100) available-width)))
+           (bar-width (round (* (/ volume 100.0) available-width)))
            (label (format " %d%% " volume))
            (label-width (length label)))
       (insert-char ?\  available-width)
@@ -244,29 +263,67 @@ Return either the new volume or nil, depending on the backend."
                          'face 'volume-bar)
       (goto-char (+ bar-start bar-width)))))
 
-(defun volume-lower (&optional amount)
-  "Lower the volume by AMOUNT percentage units."
-  (interactive "p")
-  (volume-nudge (- (or amount 1)))
-  (if volume-buffer (volume-update volume)
-    (volume-show volume)))
+(defun volume-update (&optional volume)
+  "Maybe call `volume-show' or `volume-redisplay'; return VOLUME.
+This function should be called by UI commands that change the volume."
+  (prog1 volume
+    (if volume-buffer
+        ;; The electric command loop will trigger a redisplay
+        ;; after each command anyway, so avoid doing it twice.
+        (unless volume-electric-mode
+          (volume-redisplay volume))
+      (volume-show volume))))
 
-(defun volume-raise (&optional amount)
-  "Raise the volume by AMOUNT percentage units."
-  (interactive "p")
-  (volume-nudge (or amount 1))
-  (if volume-buffer (volume-update volume)
-    (volume-show volume)))
+(defun volume-error (string)
+  "Either signal a real error, or manually beep and display STRING.
+Real errors cannot be used in electric mode."
+  (if (not volume-electric-mode)
+      (error string)
+    (beep)
+    (with-current-buffer volume-buffer
+      (let ((inhibit-read-only t))
+        (delete-region (point-min) (point-max))
+        (insert string)
+        (sit-for 2)))
+    (volume-redisplay)))
 
-(defun volume-min ()
+(defun volume-assign (n)
+  "Set the volume to N percent.
+If N is negative, call `volume-raise' instead."
+  (interactive "P")
+  (if (integerp n)
+      (if (< n 0) (volume-raise n)
+        (volume-update (volume-set n)))
+    (volume-error "Need integer argument")))
+
+(defun volume-lower (n)
+  "Lower the volume by N percentage units."
+  (interactive "p")
+  (volume-update (volume-nudge (- (or n 1)))))
+
+(defun volume-raise (n)
+  "Raise the volume by N percentage units."
+  (interactive "p")
+  (volume-update (volume-nudge (or n 1))))
+
+(defun volume-minimize ()
   "Lower the volume as much as possible."
   (interactive)
-  (volume-lower 100))
+  (volume-set 0))
 
-(defun volume-max ()
+(defun volume-maximize ()
   "Raise the volume as much as possible."
   (interactive)
-  (volume-raise 100))
+  (volume-set 100))
+
+(defun volume-assign-and-quit (&optional n)
+  "Set the volume to N percent and then quit Volume mode.
+If N is nil, just quit Volume mode."
+  (interactive "P")
+  (when (integerp n)
+    (volume-redisplay (volume-assign n))
+    (sit-for 1))
+  (volume-quit))
 
 (defun volume-quit ()
   "Quit Volume mode."
@@ -293,23 +350,34 @@ Return either the new volume or nil, depending on the backend."
   (run-mode-hooks 'volume-mode-hook))
 
 (defvar volume-mode-map
-  (let ((map (make-sparse-keymap)))
+  (let ((map (make-sparse-keymap))
+        (lower-more (lambda (n)
+                      (interactive "p")
+                      (volume-lower (* n 10))))
+        (raise-more (lambda (n)
+                      (interactive "p")
+                      (volume-raise (* n 10)))))
     (suppress-keymap map)
     (define-key map "b" 'volume-lower)
     (define-key map "f" 'volume-raise)
+    (define-key map "B" lower-more)
+    (define-key map "F" raise-more)
     (define-key map [left] 'volume-lower)
     (define-key map [right] 'volume-raise)
-    (define-key map "-" 'volume-lower)
-    (define-key map "+" 'volume-raise)
-    (define-key map "a" 'volume-min)
-    (define-key map "e" 'volume-max)
-    (define-key map "g" 'volume-update)
+    (define-key map [(shift left)] lower-more)
+    (define-key map [(shift right)] raise-more)
+    (define-key map "s" 'volume-assign)
+    (define-key map "a" 'volume-minimize)
+    (define-key map "e" 'volume-maximize)
+    (define-key map "g" 'volume-redisplay)
+    (define-key map "\C-m" 'volume-assign-and-quit)
     (define-key map "q" 'volume-quit)
-    (define-key map "\C-m" 'volume-quit)
     (define-key map [escape escape] 'volume-quit)
     map)
   "Keymap for Volume mode.")
 
+;; This function was based on the function `calculator' from
+;; calculator.el, which is copyrighted by the FSF.
 ;;;###autoload
 (defun volume ()
   "Tweak your sound card volume."
@@ -318,8 +386,7 @@ Return either the new volume or nil, depending on the backend."
   (if volume-electric-mode
       (unwind-protect
           (save-window-excursion
-            (require 'electric)
-            (message nil)
+            (require 'electric) (message nil)
             (let ((echo-keystrokes 0)
                   (garbage-collection-messages nil))
               (set-window-buffer (minibuffer-window) volume-buffer)
@@ -330,7 +397,7 @@ Return either the new volume or nil, depending on the backend."
                 (use-global-map volume-mode-map)
                 (unwind-protect
                     (progn
-                      (volume-update)
+                      (volume-redisplay)
                       (run-hooks 'volume-mode-hook)
                       (catch 'volume-done
                         (Electric-command-loop
@@ -339,7 +406,7 @@ Return either the new volume or nil, depending on the backend."
                          ;; a bug in electric.el.
                          '(lambda () 'noprompt)
                          nil
-                         (lambda (x y) (volume-update)))))
+                         (lambda (x y) (volume-redisplay)))))
                   (use-local-map old-local-map)
                   (use-global-map old-global-map)))))
         (when volume-buffer
