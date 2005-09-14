@@ -215,6 +215,22 @@ This corresponds to the `-D' option of amixer."
                  volume-amixer-extra-arguments
                  arguments)))
 
+(defun volume-amixer-control-has-volume-p (control)
+  "Return non-nil if CONTROL uses the concept of a volume."
+  (ignore-errors
+    (string-match "Capabilities: .*volume"
+                  (volume-amixer-call "get" control))))
+
+(defcustom volume-amixer-control
+  (or (when (executable-find volume-amixer-program)
+        (cond
+         ((volume-amixer-control-has-volume-p "Master") "Master")
+         ((volume-amixer-control-has-volume-p "PCM") "PCM")))
+      "Master")
+  "The name of the ALSA mixer control to manipulate."
+  :type '(radio (const "Master") (const "PCM") string)
+  :group 'volume-amixer)
+
 (defun volume-amixer-parse-output (output)
   "Parse the OUTPUT of an amixer control dump.
 Return the volume percentage as a floating-point number.
