@@ -217,9 +217,10 @@ This corresponds to the `-D' option of amixer."
 
 (defun volume-amixer-control-has-volume-p (control)
   "Return non-nil if CONTROL uses the concept of a volume."
-  (ignore-errors
-    (string-match "Capabilities: .*volume"
-                  (volume-amixer-call "get" control))))
+  (condition-case nil
+      (string-match "Capabilities: .*volume"
+                    (volume-amixer-call "get" control))
+    (error nil)))
 
 (defcustom volume-amixer-control
   (or (when (executable-find volume-amixer-program)
