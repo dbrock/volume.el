@@ -57,11 +57,22 @@
   (cond ((executable-find "aumix") 'volume-aumix-backend)
         ((executable-find "amixer") 'volume-amixer-backend))
   "The set of primitives used by Volume to do real work.
-Should be an alist containing entries `get' and `nudge',
+Value is an alist containing entries `get', `set' and `nudge',
 or the name of a variable containing such an alist."
-  :type '(choice (const :tag "aumix" volume-aumix-backend)
-                 (const :tag "amixer" volume-amixer-backend)
-                 (sexp :tag "Custom backend"))
+  :type '(radio (const :tag "aumix" volume-aumix-backend)
+                (const :tag "amixer" volume-amixer-backend)
+                (const :tag "None" nil)
+                (radio :tag "Custom" variable
+                       (list :tag "Function alist" :greedy t
+                             (cons :format "%v"
+                                   (const :format "" get)
+                                   (function :tag "Get"))
+                             (cons :format "%v"
+                                   (const :format "" set)
+                                   (function :tag "Set"))
+                             (cons :format "%v"
+                                   (const :format "" nudge)
+                                   (function :tag "Nudge")))))
   :group 'volume)
 
 (defcustom volume-electric-mode t
