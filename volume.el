@@ -123,9 +123,19 @@ See the variable `volume-backend'."
   :group 'volume-aumix)
 
 (defcustom volume-aumix-device nil
-  "The name of the mixer device."
-  :type '(choice (const :tag "Default (`/dev/mixer')" nil)
-                 (string :tag "Device file name"))
+  "The name of the mixer device, or nil for the default.
+This corresponds to the `-d' option of aumix."
+  :type '(choice (const :tag "/dev/mixer" nil)
+                 (const "/dev/mixer1")
+                 (const "/dev/mixer2")
+                 (const "/dev/mixer3")
+                 (const "/dev/mixer4")
+                 file)
+  :group 'volume-aumix)
+
+(defcustom volume-aumix-extra-arguments nil
+  "Extra arguments to pass to the aumix program."
+  :type '(repeat string)
   :group 'volume-aumix)
 
 (defun volume-aumix-call (&rest arguments)
@@ -133,6 +143,7 @@ See the variable `volume-backend'."
   (apply 'volume-call-process volume-aumix-program
          (append (when volume-aumix-device
                    (list "-d" volume-aumix-device))
+                 volume-aumix-extra-arguments
                  arguments)))
 
 (defun volume-aumix-parse-output (output)
@@ -190,9 +201,9 @@ This corresponds to the `-D' option of amixer."
   :type '(choice string (const :tag "Default" nil))
   :group 'volume-amixer)
 
-(defcustom volume-amixer-control "Master,0"
-  "The name of the ALSA mixer control."
-  :type 'string
+(defcustom volume-amixer-extra-arguments nil
+  "Extra arguments to pass to the amixer program."
+  :type '(repeat string)
   :group 'volume-amixer)
 
 (defun volume-amixer-call (&rest arguments)
@@ -202,6 +213,7 @@ This corresponds to the `-D' option of amixer."
                    (list "-c" (number-to-string volume-amixer-card)))
                  (when volume-amixer-device
                    (list "-D" volume-amixer-device))
+                 volume-amixer-extra-arguments
                  arguments)))
 
 (defun volume-amixer-parse-output (output)
