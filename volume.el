@@ -3,7 +3,7 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.4
+;; Version: 0.5
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: The late night of 9th September, 2005
