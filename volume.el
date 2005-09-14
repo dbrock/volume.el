@@ -3,7 +3,7 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.2
+;; Version: 0.3
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: The late night of 9th September, 2005
@@ -237,7 +237,7 @@ Return either the new volume or nil, depending on the backend."
   "Display the current volume in the minibuffer.
 If VOLUME is non-nil, take that to be the current volume."
   (interactive)
-  (message "Volume: %d%%" (or volume (volume-get))))
+  (message "Volume: %d%%" (or volume (round (volume-get)))))
 
 (defun volume-redisplay (&optional volume)
   "Update the Volume buffer to reflect the current volume.
