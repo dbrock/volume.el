@@ -146,26 +146,27 @@ This corresponds to the `-d' option of aumix."
                  volume-aumix-extra-arguments
                  arguments)))
 
-(defun volume-aumix-parse-output (output)
-  "Parse the OUTPUT of an aumix volume query.
+(defun volume-aumix-parse-output (string)
+  "Parse the output of an aumix volume query.
 Return the volume percentage as a floating-point number.
-If OUTPUT cannot be parsed, raise an error."
-  (if (string-match "vol \\([0-9]+\\)" output)
-      (float (string-to-number (match-string 1 output)))
+If STRING cannot be parsed, raise an error."
+  (if (string-match "vol \\([0-9]+\\)" string)
+      (float (string-to-number (match-string 1 string)))
     (error "Failed to parse aumix output")))
 
 (defun volume-aumix-get ()
-  "Return the current volume, using aumix to get it."
+  "Return the current volume in percent, using aumix to get it."
   (volume-aumix-parse-output (volume-aumix-call "-vq")))
 
 (defun volume-aumix-set (n)
-  "Use aumix to set the current volume to N percent."
+  "Use aumix to set the current volume to N percent.
+Return the new volume in percent."
   (volume-aumix-parse-output
    (volume-aumix-call (format "-v%d" n) "-vq")))
 
 (defun volume-aumix-nudge (n)
   "Use aumix to change the volume by N percentage units.
-Return the new volume, in percent."
+Return the new volume in percent."
   (let ((sign (if (>= n 0) "+" "-")))
     (volume-aumix-parse-output
      (volume-aumix-call (format "-v%s%d" sign (abs n)) "-vq"))))
@@ -188,15 +189,13 @@ Return the new volume, in percent."
   :group 'volume-amixer)
 
 (defcustom volume-amixer-card nil
-  "The ALSA sound card number.
-If nil, let amixer choose a default sound card.
+  "The ALSA sound card number to use, or nil for the default.
 This corresponds to the `-c' option of amixer."
   :type '(choice integer (const :tag "Default" nil))
   :group 'volume-amixer)
 
 (defcustom volume-amixer-device nil
-  "The ALSA device name.
-If nil, let amixer choose a default device.
+  "The ALSA device name to use, or nil for the default.
 This corresponds to the `-D' option of amixer."
   :type '(choice string (const :tag "Default" nil))
   :group 'volume-amixer)
