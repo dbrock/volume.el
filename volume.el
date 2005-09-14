@@ -230,14 +230,16 @@ If OUTPUT cannot be parsed, raise an error."
 
 (defun volume-amixer-set (n)
   "Use amixer to set the current volume to N percent."
-  (volume-amixer-call "set" volume-amixer-control
-                      (format "%d%%" n)))
+  (volume-amixer-parse-output
+   (volume-amixer-call "set" volume-amixer-control
+                       (format "%d%%" n))))
 
 (defun volume-amixer-nudge (amount)
   "Use amixer to change the volume by N percentage units."
   (let ((sign (if (>= n 0) "+" "-")))
-    (volume-amixer-call "set" volume-amixer-control
-                        (format "%s%d" sign (abs n)))))
+    (volume-amixer-parse-output
+     (volume-amixer-call "set" volume-amixer-control
+                         (format "%s%d" sign (abs n))))))
 
 
 ;;;; User interface
