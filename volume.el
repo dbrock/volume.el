@@ -256,7 +256,7 @@ If OUTPUT cannot be parsed, raise an error."
   (let ((sign (if (>= n 0) "+" "-")))
     (volume-amixer-parse-output
      (volume-amixer-call "set" volume-amixer-control
-                         (format "%s%d" sign (abs n))))))
+                         (format "%d%s" (abs n) sign)))))
 
 
 ;;;; User interface
