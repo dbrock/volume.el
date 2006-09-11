@@ -1,12 +1,12 @@
 ;;; volume.el --- tweak your sound card volume from Emacs
-;; Copyright (C) 2005  Daniel Brockman
+;; Copyright (C) 2005, 2006  Daniel Brockman
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.5
+;; Version: 0.6
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
-;; Created: The late night of 9th September, 2005
+;; Created: late at night, September 9, 2005
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -256,7 +256,7 @@ If OUTPUT cannot be parsed, raise an error."
   (let ((sign (if (>= n 0) "+" "-")))
     (volume-amixer-parse-output
      (volume-amixer-call "set" volume-amixer-control
-                         (format "%d%s" (abs n) sign)))))
+                         (format "%d%%%s" (abs n) sign)))))
 
 
 ;;;; User interface
@@ -402,6 +402,8 @@ If N is nil, just quit Volume mode."
     (suppress-keymap map)
     (define-key map "b" 'volume-lower)
     (define-key map "f" 'volume-raise)
+    (define-key map "\C-f" 'volume-raise)
+    (define-key map "\C-b" 'volume-lower)
     (define-key map "B" lower-more)
     (define-key map "F" raise-more)
     (define-key map [left] 'volume-lower)
@@ -411,6 +413,8 @@ If N is nil, just quit Volume mode."
     (define-key map "s" 'volume-assign)
     (define-key map "a" 'volume-minimize)
     (define-key map "e" 'volume-maximize)
+    (define-key map "\C-a" 'volume-minimize)
+    (define-key map "\C-e" 'volume-maximize)
     (define-key map "g" 'volume-redisplay)
     (define-key map "\C-m" 'volume-assign-and-quit)
     (define-key map "q" 'volume-quit)
