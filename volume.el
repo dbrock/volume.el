@@ -3,10 +3,11 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.6
+;; Version: 0.7
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
-;; Created: late at night, September 9, 2005
+;; Created: September 9, 2005
+;; Updated: September 22, 2006
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -19,7 +20,7 @@
 ;; See the GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public
-;; License along with GNU Emacs; if not, write to the Free
+;; License along with this program; if not, write to the Free
 ;; Software Foundation, 51 Franklin Street, Fifth Floor,
 ;; Boston, MA 02110-1301, USA.
 
@@ -29,14 +30,14 @@
 ;; and put the following autoload in your ~/.emacs:
 
 ;;   (autoload 'volume "volume"
-;;             "Tweak your sound card volume." t)
+;;     "Tweak your sound card volume." t)
 
 ;; Then type M-x volume RET to run the program.  Of course,
 ;; use M-x customize-group RET volume RET to customize it.
 
 ;;; Commentary:
 
-;; Tweaking the volume of the music used to be one of the
+;; Tweaking the volume of my music used to be one of the
 ;; few things I constantly went outside of Emacs to do.
 ;; I just decided I've had enough of that, and so I wrote
 ;; this simple mixer frontend.
@@ -57,22 +58,14 @@
   (cond ((executable-find "aumix") 'volume-aumix-backend)
         ((executable-find "amixer") 'volume-amixer-backend))
   "The set of primitives used by Volume to do real work.
-Value is an alist containing entries `get', `set' and `nudge',
-or the name of a variable containing such an alist."
+Value is an alist containing entries `get', `set', `nudge',
+`current-channel', `switch-channel', `default-channel',
+`channel-name', and `channels', or the name of a variable
+containing such an alist."
   :type '(radio (const :tag "aumix" volume-aumix-backend)
                 (const :tag "amixer" volume-amixer-backend)
                 (const :tag "None" nil)
-                (radio :tag "Custom" variable
-                       (list :tag "Function alist" :greedy t
-                             (cons :format "%v"
-                                   (const :format "" get)
-                                   (function :tag "Get"))
-                             (cons :format "%v"
-                                   (const :format "" set)
-                                   (function :tag "Set"))
-                             (cons :format "%v"
-                                   (const :format "" nudge)
-                                   (function :tag "Nudge")))))
+                (variable :tag "Custom"))
   :group 'volume)
 
 (defcustom volume-electric-mode t
@@ -91,8 +84,11 @@ Electric mode saves some space, but uses its own command loop."
 See the variable `volume-backend'."
   (let ((backend (symbol-value (indirect-variable volume-backend))))
     (when (null backend)
-      (error "No backend (see `volume-backend')"))
-    (apply (cdr (assoc primitive backend)) arguments)))
+      (volume-error "No backend (see `volume-backend')"))
+    (let ((function (cdr (assoc primitive backend))))
+      (when (null function)
+        (volume-error "No `%s' operation for current backend" primitive))
+      (apply function arguments))))
 
 (defvar volume-buffer nil
   "The current Volume buffer, or nil.")
@@ -102,8 +98,9 @@ See the variable `volume-backend'."
   (with-output-to-string
     (with-current-buffer standard-output
       (unless (eq 0 (apply 'call-process program nil t nil arguments))
-        (error "Process `%s' exited abnormally"
-               (mapconcat 'identity (cons program arguments) " "))))))
+        (volume-error
+         "Process `%s' exited abnormally"
+         (mapconcat 'identity (cons program arguments) " "))))))
 
 
 ;;;; The aumix backend
@@ -111,7 +108,12 @@ See the variable `volume-backend'."
 (defvar volume-aumix-backend
   '((get . volume-aumix-get)
     (set . volume-aumix-set)
-    (nudge . volume-aumix-nudge)))
+    (nudge . volume-aumix-nudge)
+    (current-channel . volume-aumix-current-channel)
+    (switch-channel . volume-aumix-switch-channel)
+    (default-channel . volume-aumix-default-channel)
+    (channel-name . volume-aumix-channel-name)
+    (channels . volume-aumix-channels)))
 
 (defgroup volume-aumix nil
   "The aumix backend."
@@ -133,6 +135,58 @@ This corresponds to the `-d' option of aumix."
                  file)
   :group 'volume-aumix)
 
+(defvar volume-aumix-all-channels
+  '(("-v" . "Master")
+    ("-b" . "Bass")
+    ("-t" . "Treble")
+    ("-w" . "PCM")
+    ("-W" . "PCM 2")
+    ("-l" . "Line")
+    ("-1" . "Line 1")
+    ("-2" . "Line 2")
+    ("-3" . "Line 3")
+    ("-s" . "Synthesizer")
+    ("-p" . "PC speaker")
+    ("-c" . "CD")
+    ("-x" . "Mix monitor")
+    ("-m" . "Microphone")
+    ("-r" . "Record")
+    ("-i" . "Input gain")
+    ("-o" . "Output gain"))
+  "Alist mapping aumix options to channel names.")
+
+(defvar volume-aumix-default-channels
+  (mapcar (lambda (channel)
+            (rassoc channel volume-aumix-all-channels))
+          '("Master" "Bass" "Treble" "PCM" "Line"))
+  "The default value of `volume-aumix-channels'.")
+
+(defcustom volume-aumix-channels volume-aumix-default-channels
+  "Alist mapping aumix options to channel names."
+  :type `(set ,@(mapcar (lambda (entry)
+                             `(const :tag ,(cdr entry) ,entry))
+                           volume-aumix-all-channels)
+              (repeat :tag "Others" :inline t
+                      (cons :tag "Channel"
+                            (string :tag "Option (see `aumix -h')")
+                            (string :tag "Name"))))
+  :group 'volume-aumix)
+
+(defcustom volume-aumix-default-channel '("-v" . "Master")
+  "The aumix option for the default audio channel to manipulate."
+  :type `(choice ,@(mapcar (lambda (entry)
+                             `(const :tag ,(cdr entry) ,entry))
+                           volume-aumix-all-channels)
+                 (string :tag "Other (specify aumix option)"))
+  :group 'volume-aumix)
+
+(defvar volume-aumix-current-channel volume-aumix-default-channel
+  "The aumix option for the audio channel to manipulate.")
+
+(defun volume-aumix-current-channel-option ()
+  "Return the aumix option for the current channel."
+  (car volume-aumix-current-channel))
+
 (defcustom volume-aumix-extra-arguments nil
   "Extra arguments to pass to the aumix program."
   :type '(repeat string)
@@ -150,26 +204,54 @@ This corresponds to the `-d' option of aumix."
   "Parse the output of an aumix volume query.
 Return the volume percentage as a floating-point number.
 If STRING cannot be parsed, raise an error."
-  (if (string-match "vol \\([0-9]+\\)" string)
+  (if (string-match "^\\S-+ \\([0-9]+\\)" string)
       (float (string-to-number (match-string 1 string)))
-    (error "Failed to parse aumix output")))
+    (volume-error "Failed to parse aumix output")))
 
 (defun volume-aumix-get ()
   "Return the current volume in percent, using aumix to get it."
-  (volume-aumix-parse-output (volume-aumix-call "-vq")))
+  (volume-aumix-parse-output
+   (volume-aumix-call
+    (concat (volume-aumix-current-channel-option) "q"))))
 
 (defun volume-aumix-set (n)
   "Use aumix to set the current volume to N percent.
 Return the new volume in percent."
   (volume-aumix-parse-output
-   (volume-aumix-call (format "-v%d" n) "-vq")))
+   (volume-aumix-call
+    (concat (volume-aumix-current-channel-option)
+            (number-to-string n))
+    (concat (volume-aumix-current-channel-option) "q"))))
 
 (defun volume-aumix-nudge (n)
   "Use aumix to change the volume by N percentage units.
 Return the new volume in percent."
   (let ((sign (if (>= n 0) "+" "-")))
     (volume-aumix-parse-output
-     (volume-aumix-call (format "-v%s%d" sign (abs n)) "-vq"))))
+     (volume-aumix-call
+      (concat (volume-aumix-current-channel-option)
+              sign (number-to-string (abs n)) )
+      (concat (volume-aumix-current-channel-option) "q")))))
+
+(defun volume-aumix-current-channel ()
+  "Return the current channel for aumix."
+  volume-aumix-current-channel)
+
+(defun volume-aumix-switch-channel (channel)
+  "Make CHANNEL current for aumix."
+  (setq volume-aumix-current-channel channel))
+
+(defun volume-aumix-default-channel ()
+  "Return the default channel for aumix."
+  volume-aumix-default-channel)
+
+(defun volume-aumix-channel-name (channel)
+  "Return the name of CHANNEL."
+  (cdr channel))
+
+(defun volume-aumix-channels ()
+  "Return the list of available channels for aumix."
+  volume-aumix-channels)
 
 
 ;;;; The amixer backend
@@ -177,7 +259,12 @@ Return the new volume in percent."
 (defvar volume-amixer-backend
   '((get . volume-amixer-get)
     (set . volume-amixer-set)
-    (nudge . volume-amixer-nudge)))
+    (nudge . volume-amixer-nudge)
+    (current-channel . volume-amixer-current-channel)
+    (switch-channel . volume-amixer-switch-channel)
+    (default-channel . volume-amixer-default-channel)
+    (channel-name . volume-amixer-channel-name)
+    (channels . volume-amixer-channels)))
 
 (defgroup volume-amixer nil
   "The amixer backend."
@@ -200,6 +287,67 @@ This corresponds to the `-D' option of amixer."
   :type '(choice string (const :tag "Default" nil))
   :group 'volume-amixer)
 
+(defun volume-amixer-channel-has-volume-p (channel)
+  "Return non-nil if CHANNEL uses the concept of a volume."
+  (condition-case nil
+      (string-match "^\\s-*Capabilities: \\<[a-z]*volume\\>"
+                    (volume-amixer-call "get" channel))
+    (error nil)))
+
+(defvar volume-amixer-default-channels
+  '("Master" "Bass" "Treble" "PCM" "Line")
+  "The default value of `volume-amixer-channels'.")
+
+(defcustom volume-amixer-channels
+  (if (executable-find volume-amixer-program)
+      (apply 'append
+             (mapcar (lambda (channel)
+                       (when (volume-amixer-channel-has-volume-p channel)
+                         (list channel)))
+                     volume-amixer-default-channels))
+    volume-amixer-default-channels)
+  "The names of the ALSA mixer channels to manipulate."
+  :type `(set ,@(if (executable-find volume-amixer-program)
+                    (let (channels)
+                      (with-temp-buffer
+                        (call-process volume-amixer-program nil t)
+                        (goto-char (point-min))
+                        (while (search-forward-regexp
+                                "^\\s-*Capabilities: \\<[a-z]*volume\\>"
+                                nil t)
+                          (save-excursion
+                            (search-backward-regexp
+                             "^\\s-*Simple mixer control '\\(.*\\)'")
+                            (setq channels (cons (match-string 1)
+                                                 channels)))))
+                      (mapcar (lambda (channel)
+                                `(const ,channel))
+                              channels))
+                  volume-amixer-default-channels)
+          (repeat :tag "Others" :inline t
+                  (string :tag "Channel")))
+  :group 'volume-amixer)
+
+(defcustom volume-amixer-default-channel
+  (if (executable-find volume-amixer-program)
+      (cond
+       ((volume-amixer-channel-has-volume-p "Master") "Master")
+       ((volume-amixer-channel-has-volume-p "PCM") "PCM")
+       (t (or (car-safe volume-amixer-channels) "Master")))
+    "Master")
+  "The name of the default ALSA mixer channel to manipulate."
+  :type `(radio ,@(mapcar (lambda (channel)
+                            `(const ,channel))
+                          volume-amixer-channels)
+                (string :tag "Other"))
+  :group 'volume-amixer)
+
+(define-obsolete-variable-alias 'volume-amixer-control
+  'volume-amixer-default-channel)
+
+(defvar volume-amixer-current-channel volume-amixer-default-channel
+  "The name of the ALSA mixer channel to manipulate.")
+
 (defcustom volume-amixer-extra-arguments nil
   "Extra arguments to pass to the amixer program."
   :type '(repeat string)
@@ -215,48 +363,57 @@ This corresponds to the `-D' option of amixer."
                  volume-amixer-extra-arguments
                  arguments)))
 
-(defun volume-amixer-control-has-volume-p (control)
-  "Return non-nil if CONTROL uses the concept of a volume."
-  (condition-case nil
-      (string-match "Capabilities: .*volume"
-                    (volume-amixer-call "get" control))
-    (error nil)))
-
-(defcustom volume-amixer-control
-  (or (when (executable-find volume-amixer-program)
-        (cond
-         ((volume-amixer-control-has-volume-p "Master") "Master")
-         ((volume-amixer-control-has-volume-p "PCM") "PCM")))
-      "Master")
-  "The name of the ALSA mixer control to manipulate."
-  :type '(radio (const "Master") (const "PCM") string)
-  :group 'volume-amixer)
-
 (defun volume-amixer-parse-output (output)
   "Parse the OUTPUT of an amixer control dump.
 Return the volume percentage as a floating-point number.
 If OUTPUT cannot be parsed, raise an error."
   (if (string-match "\\[\\([0-9]+\\)%\\]" output)
       (float (string-to-number (match-string 1 output)))
-    (error "Failed to parse amixer output")))
+    (volume-error "Failed to parse amixer output")))
 
 (defun volume-amixer-get ()
   "Return the current volume, using amixer to get it."
   (volume-amixer-parse-output
-   (volume-amixer-call "get" volume-amixer-control)))
+   (volume-amixer-call "get" volume-amixer-current-channel)))
 
 (defun volume-amixer-set (n)
   "Use amixer to set the current volume to N percent."
   (volume-amixer-parse-output
-   (volume-amixer-call "set" volume-amixer-control
+   (volume-amixer-call "set" volume-amixer-current-channel
                        (format "%d%%" n))))
 
-(defun volume-amixer-nudge (amount)
+(defun volume-amixer-nudge (n)
   "Use amixer to change the volume by N percentage units."
-  (let ((sign (if (>= n 0) "+" "-")))
-    (volume-amixer-parse-output
-     (volume-amixer-call "set" volume-amixer-control
-                         (format "%d%%%s" (abs n) sign)))))
+  (let ((sign (if (>= n 0) "+" "-"))
+        (current (volume-amixer-get)))
+    (when (= current
+             (volume-amixer-parse-output
+              (volume-amixer-call "set" volume-amixer-current-channel
+                                  (format "%d%%%s" (abs n) sign))))
+      ;; If nudging by `N%' didn't work, try `N'.
+      (volume-amixer-parse-output
+       (volume-amixer-call "set" volume-amixer-current-channel
+                           (format "%d%s" (abs n) sign))))))
+
+(defun volume-amixer-current-channel ()
+  "Return the current channel for amixer."
+  volume-amixer-current-channel)
+
+(defun volume-amixer-switch-channel (channel)
+  "Make CHANNEL current for amixer."
+  (setq volume-amixer-current-channel channel))
+
+(defun volume-amixer-default-channel ()
+  "Return the default channel for amixer."
+  volume-amixer-default-channel)
+
+(defun volume-amixer-channel-name (channel)
+  "Return the name of CHANNEL."
+  channel)
+
+(defun volume-amixer-channels ()
+  "Return the list of available channels for amixer."
+  volume-amixer-channels)
 
 
 ;;;; User interface
@@ -274,11 +431,60 @@ If OUTPUT cannot be parsed, raise an error."
 Return either the new volume or nil, depending on the backend."
   (volume-backend-call 'nudge n))
 
+(defun volume-current-channel ()
+  "Return the current channel."
+  (volume-backend-call 'current-channel))
+
+(defun volume-switch-channel (channel)
+  "Make CHANNEL current."
+  (volume-backend-call 'switch-channel channel))
+
+(defun volume-default-channel ()
+  "Retur the default channel."
+  (volume-backend-call 'default-channel))
+
+(defun volume-channel-name (channel)
+  "Return the name of CHANNEL."
+  (volume-backend-call 'channel-name channel))
+
+(defun volume-channels ()
+  "Return the list of available channels."
+  (volume-backend-call 'channels))
+
+(defun volume-next-channel ()
+  "Switch to the next channel."
+  (interactive)
+  (let* ((channels (volume-channels))
+         (channel (or (car-safe
+                       (cdr-safe
+                        (member (volume-current-channel) channels)))
+                      (car-safe channels))))
+    (if channel
+        (volume-switch-channel channel)
+      (volume-error "Channel list is empty"))))
+
+(defun volume-previous-channel ()
+  "Switch to the previous channel."
+  (interactive)
+  (let* ((reverse-channels (reverse (volume-channels)))
+         (channel (or (car-safe
+                       (cdr-safe
+                        (member (volume-current-channel) reverse-channels)))
+                      (car-safe reverse-channels))))
+    (if channel
+        (volume-switch-channel channel)
+      (volume-error "Channel list is empty"))))
+
 (defun volume-show (&optional volume)
   "Display the current volume in the minibuffer.
 If VOLUME is non-nil, take that to be the current volume."
   (interactive)
-  (message "Volume: %d%%" (or volume (round (volume-get)))))
+  (message "Volume%s: %d%%"
+           (if (equal (volume-current-channel)
+                      (volume-default-channel)) ""
+             (concat " (" (volume-channel-name
+                           (volume-current-channel)) ")"))
+           (or volume (round (volume-get)))))
 
 (defun volume-redisplay (&optional volume)
   "Update the Volume buffer to reflect the current volume.
@@ -289,7 +495,12 @@ If VOLUME is non-nil, take that to be the current volume."
   (let ((inhibit-read-only t))
     (set-buffer volume-buffer)
     (delete-region (point-min) (point-max))
-    (insert "Volume: ")
+    (insert "Volume")
+    (unless (equal (volume-current-channel)
+                   (volume-default-channel))
+      (insert " (" (volume-channel-name
+                    (volume-current-channel)) ")"))
+    (insert ": ")
     (let* ((bar-start (point))
            (available-width (- (window-width) bar-start))
            (bar-width (round (* (/ volume 100.0) available-width)))
@@ -316,16 +527,17 @@ This function should be called by UI commands that change the volume."
           (volume-redisplay volume))
       (volume-show volume))))
 
-(defun volume-error (string)
-  "Either signal a real error, or manually beep and display STRING.
+(defun volume-error (format &rest strings)
+  "Either signal a real error, or manually beep and display message.
 Real errors cannot be used in electric mode."
-  (if (not volume-electric-mode)
-      (error string)
+  (if (or (not volume-electric-mode)
+          (null volume-buffer))
+      (apply 'error format strings)
     (beep)
     (with-current-buffer volume-buffer
       (let ((inhibit-read-only t))
         (delete-region (point-min) (point-max))
-        (insert string)
+        (insert (apply 'format format strings))
         (sit-for 2)))
     (volume-redisplay)))
 
@@ -338,12 +550,12 @@ If N is negative, call `volume-raise' instead."
         (volume-update (volume-set n)))
     (volume-error "Need integer argument")))
 
-(defun volume-lower (n)
+(defun volume-lower (&optional n)
   "Lower the volume by N percentage units."
   (interactive "p")
   (volume-update (volume-nudge (- (or n 1)))))
 
-(defun volume-raise (n)
+(defun volume-raise (&optional n)
   "Raise the volume by N percentage units."
   (interactive "p")
   (volume-update (volume-nudge (or n 1))))
@@ -380,7 +592,7 @@ If N is nil, just quit Volume mode."
     (setq volume-buffer nil)))
 
 (defun volume-mode ()
-  "Major mode for twiddling your audio volume.
+  "Major mode for tweaking your audio volume.
 
 \\{volume-mode-map}"
   (interactive)
@@ -402,19 +614,31 @@ If N is nil, just quit Volume mode."
     (suppress-keymap map)
     (define-key map "b" 'volume-lower)
     (define-key map "f" 'volume-raise)
-    (define-key map "\C-f" 'volume-raise)
     (define-key map "\C-b" 'volume-lower)
-    (define-key map "B" lower-more)
-    (define-key map "F" raise-more)
+    (define-key map "\C-f" 'volume-raise)
+    (define-key map "\M-b" lower-more)
+    (define-key map "\M-f" raise-more)
     (define-key map [left] 'volume-lower)
     (define-key map [right] 'volume-raise)
-    (define-key map [(shift left)] lower-more)
-    (define-key map [(shift right)] raise-more)
+    (define-key map [(control left)] lower-more)
+    (define-key map [(control right)] raise-more)
+    (define-key map [(meta left)] lower-more)
+    (define-key map [(meta right)] raise-more)
     (define-key map "s" 'volume-assign)
     (define-key map "a" 'volume-minimize)
     (define-key map "e" 'volume-maximize)
     (define-key map "\C-a" 'volume-minimize)
     (define-key map "\C-e" 'volume-maximize)
+    (define-key map [home] 'volume-minimize)
+    (define-key map [end] 'volume-maximize)
+    (define-key map "n" 'volume-next-channel)
+    (define-key map "p" 'volume-previous-channel)
+    (define-key map "\C-n" 'volume-next-channel)
+    (define-key map "\C-p" 'volume-previous-channel)
+    (define-key map "\M-n" 'volume-next-channel)
+    (define-key map "\M-p" 'volume-previous-channel)
+    (define-key map [up] 'volume-next-channel)
+    (define-key map [down] 'volume-previous-channel)
     (define-key map "g" 'volume-redisplay)
     (define-key map "\C-m" 'volume-assign-and-quit)
     (define-key map "q" 'volume-quit)
@@ -472,6 +696,13 @@ If N is nil, just quit Volume mode."
       (select-window (get-buffer-window volume-buffer))))
     (volume-mode)
     (setq buffer-read-only t)))
+
+;;; Local Variables:
+;;; coding: utf-8
+;;; time-stamp-format: "%:b %:d, %:y"
+;;; time-stamp-start: ";; Updated: "
+;;; time-stamp-end: "$"
+;;; End:
 
 (provide 'volume)
 ;;; volume.el ends here.
