@@ -3,7 +3,7 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.7
+;; Version: 0.8
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
@@ -60,7 +60,7 @@
   "The set of primitives used by Volume to do real work.
 Value is an alist containing entries `get', `set', `nudge',
 `current-channel', `switch-channel', `default-channel',
-`channel-name', and `channels', or the name of a variable
+`channel-label', and `channels', or the name of a variable
 containing such an alist."
   :type '(radio (const :tag "aumix" volume-aumix-backend)
                 (const :tag "amixer" volume-amixer-backend)
@@ -93,14 +93,38 @@ See the variable `volume-backend'."
 (defvar volume-buffer nil
   "The current Volume buffer, or nil.")
 
+(defun volume-call-process-to-string (program &rest arguments)
+  "Call `volume-call-process' in a temporary buffer.
+If `volume-call-process' returns normally, return the process output
+as a string.  Otherwise, raise an error or return nil."
+  (catch 'return
+    (with-output-to-string
+      (with-current-buffer standard-output
+        (when (null (apply 'volume-call-process program arguments))
+          (throw 'return nil))))))
+
 (defun volume-call-process (program &rest arguments)
-  "Like `shell-command-to-string', but doesn't have to use the shell."
-  (with-output-to-string
-    (with-current-buffer standard-output
-      (unless (eq 0 (apply 'call-process program nil t nil arguments))
-        (volume-error
-         "Process `%s' exited abnormally"
-         (mapconcat 'identity (cons program arguments) " "))))))
+  "Call PROGRAM using `call-process' and raise an error on failure.
+Specificaly, call (apply 'call-process PROGRAM nil t nil ARGUMENTS).
+If `call-process' returns anything other than zero, raise an error.
+If the process produced output and failed, display the output in a
+  temporary buffer before raising the error.
+If Volume is running an electric command loop, return nil on error.
+If `call-process' returns zero, leave point at the start of the buffer
+  and return non-nil."
+  (if (equal 0 (apply 'call-process program nil t nil arguments))
+      (prog1 t (goto-char (point-min)))
+    (prog1 nil
+      (let* ((command-line
+              (mapconcat 'identity (cons program arguments) " "))
+             (message
+              (format "Process `%s' exited abnormally " command-line)))
+        (if (= (point-min) (point-max))
+            (volume-error "%s" (concat message " with no output"))
+          (with-output-to-temp-buffer
+              (format "*Process output: %s*" command-line)
+            (princ (buffer-string)))
+          (volume-error "%s" message))))))
 
 
 ;;;; The aumix backend
@@ -112,7 +136,7 @@ See the variable `volume-backend'."
     (current-channel . volume-aumix-current-channel)
     (switch-channel . volume-aumix-switch-channel)
     (default-channel . volume-aumix-default-channel)
-    (channel-name . volume-aumix-channel-name)
+    (channel-label . volume-aumix-channel-label)
     (channels . volume-aumix-channels)))
 
 (defgroup volume-aumix nil
@@ -135,49 +159,103 @@ This corresponds to the `-d' option of aumix."
                  file)
   :group 'volume-aumix)
 
+;;; These channel names were taken from <linux/soundcard.h>.
 (defvar volume-aumix-all-channels
-  '(("-v" . "Master")
-    ("-b" . "Bass")
-    ("-t" . "Treble")
-    ("-w" . "PCM")
-    ("-W" . "PCM 2")
-    ("-l" . "Line")
-    ("-1" . "Line 1")
-    ("-2" . "Line 2")
-    ("-3" . "Line 3")
-    ("-s" . "Synthesizer")
-    ("-p" . "PC speaker")
-    ("-c" . "CD")
-    ("-x" . "Mix monitor")
-    ("-m" . "Microphone")
-    ("-r" . "Record")
-    ("-i" . "Input gain")
-    ("-o" . "Output gain"))
-  "Alist mapping aumix options to channel names.")
+  '(("vol" "-v" "Master")
+    ("bass" "-b" "Bass")
+    ("treble" "-t" "Treble")
+    ("pcm" "-w" "PCM")
+    ("pcm2" "-W" "PCM 2")
+    ("line" "-l" "Line")
+    ("line1" "-1" "Line 1")
+    ("line2" "-2" "Line 2")
+    ("line3" "-3" "Line 3")
+    ("synth" "-s" "Synthesizer")
+    ("speaker" "-p" "PC speaker")
+    ("cd" "-c" "CD")
+    ("mix" "-x" "Mix")
+    ("mic" "-m" "Microphone")
+    ("rec" "-r" "Record")
+    ("igain" "-i" "Input gain")
+    ("ogain" "-o" "Output gain")
+    ("dig1" nil "Digital 1")
+    ("dig2" nil "Digital 2")
+    ("dig3" nil "Digital 3")
+    ("phin" nil "Phone in")
+    ("phout" nil "Phone out")
+    ("video" nil "Video")
+    ("radio" nil "Radio")
+    ("monitor" nil "Monitor"))
+  "List of recognized aumix channels.")
 
 (defvar volume-aumix-default-channels
-  (mapcar (lambda (channel)
-            (rassoc channel volume-aumix-all-channels))
-          '("Master" "Bass" "Treble" "PCM" "Line"))
-  "The default value of `volume-aumix-channels'.")
+  (mapcar (lambda (channel-name)
+            (assoc channel-name volume-aumix-all-channels))
+          '("vol" "bass" "treble" "pcm" "line"))
+  "The default value of `volume-aumix-channels'.
+You probably don't want to change this variable; instead,
+change `volume-aumix-channels' directly.")
 
-(defcustom volume-aumix-channels volume-aumix-default-channels
-  "Alist mapping aumix options to channel names."
-  :type `(set ,@(mapcar (lambda (entry)
-                             `(const :tag ,(cdr entry) ,entry))
-                           volume-aumix-all-channels)
-              (repeat :tag "Others" :inline t
-                      (cons :tag "Channel"
-                            (string :tag "Option (see `aumix -h')")
-                            (string :tag "Name"))))
+(defvar volume-aumix-available-channels
+  (when (executable-find volume-aumix-program)
+    (let (result)
+      (with-temp-buffer
+        (volume-call-process volume-aumix-program "-q")
+        (while (re-search-forward "^\\S-+" nil t)
+          (let* ((channel-name (match-string 0))
+                 (channel (assoc channel-name volume-aumix-all-channels)))
+            (if channel
+                (when (cadr channel)
+                  (setq result (cons channel result)))
+              (message "Unrecognized aumix channel: `%s'"
+                       channel-name))))
+        (reverse result))))
+  "List of available aumix channels.
+You probably don't want to change this variable; instead,
+change `volume-aumix-channels'.")
+
+(defcustom volume-aumix-channels
+  (apply 'append
+         (mapcar (lambda (channel)
+                   (when (member channel volume-aumix-available-channels)
+                     (list channel)))
+                 volume-aumix-default-channels))
+  "List of channels to manipulate using aumix."
+  :type
+  `(list (set :tag "Available channels" :inline t
+              :format "%t:\n%v"
+              ,@(mapcar (lambda (entry)
+                          `(const :tag ,(nth 2 entry) ,entry))
+                        volume-aumix-available-channels))
+         (set :tag "Apparently unavailable channels" :inline t
+              :format "%t:\n%v"
+              ,@(apply
+                 'append
+                 (mapcar
+                  (lambda (entry)
+                    (when (cadr entry)
+                      (unless (member entry volume-aumix-available-channels)
+                        `((const :tag ,(nth 2 entry) ,entry)))))
+                  volume-aumix-all-channels)))
+         (repeat :tag "Other channels" :inline t
+                 (list :tag "Channel"
+                       (string :tag "Name (see `aumix -q')")
+                       (string :tag "Option (see `aumix -h')")
+                       (string :tag "Label (user-friendly name)"))))
   :group 'volume-aumix)
 
-(defcustom volume-aumix-default-channel '("-v" . "Master")
-  "The aumix option for the default audio channel to manipulate."
+(defcustom volume-aumix-default-channel
+  (if (executable-find volume-aumix-program)
+      (or (car-safe (assoc "vol" volume-aumix-channels))
+          (car-safe (assoc "pcm" volume-aumix-channels))
+          (car-safe (car-safe volume-aumix-channels))
+          "vol")
+    "vol")
+  "The name of the default audio channel to manipulate using aumix."
   :type `(choice ,@(mapcar (lambda (entry)
-                             `(const :tag ,(cdr entry) ,entry))
-                           volume-aumix-all-channels)
-                 (string :tag "Other (specify aumix option)"))
+                             `(const :tag ,(nth 2 entry) ,(car entry)))
+                           volume-aumix-channels)
+                 (string :tag "Other (specify name as in `aumix -q')"))
   :group 'volume-aumix)
 
 (defvar volume-aumix-current-channel volume-aumix-default-channel
@@ -185,7 +263,15 @@ This corresponds to the `-d' option of aumix."
 
 (defun volume-aumix-current-channel-option ()
   "Return the aumix option for the current channel."
-  (car volume-aumix-current-channel))
+  (nth 1 (volume-aumix-current-channel)))
+
+(defun volume-aumix-channel (channel)
+  "If CHANNEL is a channel, return it.
+If CHANNEL is the name of a channel, return the channel."
+  (if (consp channel)
+      channel
+    (or (assoc channel volume-aumix-channels)
+        (assoc channel volume-aumix-all-channels))))
 
 (defcustom volume-aumix-extra-arguments nil
   "Extra arguments to pass to the aumix program."
@@ -194,19 +280,22 @@ This corresponds to the `-d' option of aumix."
 
 (defun volume-aumix-call (&rest arguments)
   "Call aumix with ARGUMENTS and return the output."
-  (apply 'volume-call-process volume-aumix-program
+  (apply 'volume-call-process-to-string volume-aumix-program
          (append (when volume-aumix-device
                    (list "-d" volume-aumix-device))
                  volume-aumix-extra-arguments
                  arguments)))
 
-(defun volume-aumix-parse-output (string)
-  "Parse the output of an aumix volume query.
+(defun volume-aumix-parse-output (output)
+  "Parse the OUTPUT of an aumix volume query.
 Return the volume percentage as a floating-point number.
-If STRING cannot be parsed, raise an error."
-  (if (string-match "^\\S-+ \\([0-9]+\\)" string)
-      (float (string-to-number (match-string 1 string)))
-    (volume-error "Failed to parse aumix output")))
+If OUTPUT cannot be parsed, raise an error."
+  (when output
+    (if (string-match "^\\S-+ \\([0-9]+\\)" output)
+        (float (string-to-number (match-string 1 output)))
+      (volume-error "Failed to parse aumix output"))))
+
+;;; The following are API functions.
 
 (defun volume-aumix-get ()
   "Return the current volume in percent, using aumix to get it."
@@ -235,19 +324,20 @@ Return the new volume in percent."
 
 (defun volume-aumix-current-channel ()
   "Return the current channel for aumix."
-  volume-aumix-current-channel)
+  (volume-aumix-channel volume-aumix-current-channel))
 
 (defun volume-aumix-switch-channel (channel)
   "Make CHANNEL current for aumix."
-  (setq volume-aumix-current-channel channel))
+  (setq volume-aumix-current-channel
+        (volume-aumix-channel channel)))
 
 (defun volume-aumix-default-channel ()
   "Return the default channel for aumix."
-  volume-aumix-default-channel)
+  (volume-aumix-channel volume-aumix-default-channel))
 
-(defun volume-aumix-channel-name (channel)
-  "Return the name of CHANNEL."
-  (cdr channel))
+(defun volume-aumix-channel-label (channel)
+  "Return the user-friendly name of CHANNEL."
+  (nth 2 (volume-aumix-channel channel)))
 
 (defun volume-aumix-channels ()
   "Return the list of available channels for aumix."
@@ -263,7 +353,7 @@ Return the new volume in percent."
     (current-channel . volume-amixer-current-channel)
     (switch-channel . volume-amixer-switch-channel)
     (default-channel . volume-amixer-default-channel)
-    (channel-name . volume-amixer-channel-name)
+    (channel-label . volume-amixer-channel-label)
     (channels . volume-amixer-channels)))
 
 (defgroup volume-amixer nil
@@ -287,58 +377,50 @@ This corresponds to the `-D' option of amixer."
   :type '(choice string (const :tag "Default" nil))
   :group 'volume-amixer)
 
-(defun volume-amixer-channel-has-volume-p (channel)
-  "Return non-nil if CHANNEL uses the concept of a volume."
-  (condition-case nil
-      (string-match "^\\s-*Capabilities: \\<[a-z]*volume\\>"
-                    (volume-amixer-call "get" channel))
-    (error nil)))
-
 (defvar volume-amixer-default-channels
   '("Master" "Bass" "Treble" "PCM" "Line")
   "The default value of `volume-amixer-channels'.")
 
+(defvar volume-amixer-available-channels
+  (when (executable-find volume-amixer-program)
+    (let (result)
+      (with-temp-buffer
+        (volume-call-process volume-amixer-program)
+        (while (re-search-forward (concat "^\\s-*Capabilities: "
+                                          "\\<[a-z]*volume\\>")
+                                  nil 'noerror)
+          (save-excursion
+            (re-search-backward "^\\s-*Simple mixer control '\\(.*\\)'")
+            (setq result (cons (match-string 1) result)))))
+      result))
+  "List of available amixer channels.")
+
 (defcustom volume-amixer-channels
-  (if (executable-find volume-amixer-program)
-      (apply 'append
-             (mapcar (lambda (channel)
-                       (when (volume-amixer-channel-has-volume-p channel)
-                         (list channel)))
-                     volume-amixer-default-channels))
-    volume-amixer-default-channels)
+  (apply 'append
+         (mapcar
+          (lambda (channel)
+            (when (member channel volume-amixer-available-channels)
+              (list channel)))
+          volume-amixer-default-channels))
   "The names of the ALSA mixer channels to manipulate."
-  :type `(set ,@(if (executable-find volume-amixer-program)
-                    (let (channels)
-                      (with-temp-buffer
-                        (call-process volume-amixer-program nil t)
-                        (goto-char (point-min))
-                        (while (search-forward-regexp
-                                "^\\s-*Capabilities: \\<[a-z]*volume\\>"
-                                nil t)
-                          (save-excursion
-                            (search-backward-regexp
-                             "^\\s-*Simple mixer control '\\(.*\\)'")
-                            (setq channels (cons (match-string 1)
-                                                 channels)))))
-                      (mapcar (lambda (channel)
-                                `(const ,channel))
-                              channels))
-                  volume-amixer-default-channels)
-          (repeat :tag "Others" :inline t
-                  (string :tag "Channel")))
+  :type `(set ,@(mapcar (lambda (channel)
+                          `(const ,channel))
+                        volume-amixer-available-channels)
+              (repeat :tag "Others" :inline t
+                      (string :tag "Channel")))
   :group 'volume-amixer)
 
 (defcustom volume-amixer-default-channel
   (if (executable-find volume-amixer-program)
-      (cond
-       ((volume-amixer-channel-has-volume-p "Master") "Master")
-       ((volume-amixer-channel-has-volume-p "PCM") "PCM")
-       (t (or (car-safe volume-amixer-channels) "Master")))
+      (or (assoc "Master" volume-amixer-channels)
+          (assoc "PCM" volume-amixer-channels)
+          (car-safe volume-amixer-channels)
+          "Master")
     "Master")
   "The name of the default ALSA mixer channel to manipulate."
-  :type `(radio ,@(mapcar (lambda (channel)
-                            `(const ,channel))
-                          volume-amixer-channels)
+  :type `(choice ,@(mapcar (lambda (channel)
+                             `(const ,channel))
+                           volume-amixer-available-channels)
                 (string :tag "Other"))
   :group 'volume-amixer)
 
@@ -355,7 +437,7 @@ This corresponds to the `-D' option of amixer."
 
 (defun volume-amixer-call (&rest arguments)
   "Call amixer with ARGUMENTS and return the output."
-  (apply 'volume-call-process volume-amixer-program
+  (apply 'volume-call-process-to-string volume-amixer-program
          (append (when volume-amixer-card
                    (list "-c" (number-to-string volume-amixer-card)))
                  (when volume-amixer-device
@@ -367,9 +449,12 @@ This corresponds to the `-D' option of amixer."
   "Parse the OUTPUT of an amixer control dump.
 Return the volume percentage as a floating-point number.
 If OUTPUT cannot be parsed, raise an error."
-  (if (string-match "\\[\\([0-9]+\\)%\\]" output)
-      (float (string-to-number (match-string 1 output)))
-    (volume-error "Failed to parse amixer output")))
+  (when output
+    (if (string-match "\\[\\([0-9]+\\)%\\]" output)
+        (float (string-to-number (match-string 1 output)))
+      (volume-error "Failed to parse amixer output"))))
+
+;;; The following are API functions.
 
 (defun volume-amixer-get ()
   "Return the current volume, using amixer to get it."
@@ -386,10 +471,12 @@ If OUTPUT cannot be parsed, raise an error."
   "Use amixer to change the volume by N percentage units."
   (let ((sign (if (>= n 0) "+" "-"))
         (current (volume-amixer-get)))
-    (when (= current
-             (volume-amixer-parse-output
-              (volume-amixer-call "set" volume-amixer-current-channel
-                                  (format "%d%%%s" (abs n) sign))))
+    (when (and (equal current
+                      (volume-amixer-parse-output
+                       (volume-amixer-call
+                        "set" volume-amixer-current-channel
+                        (format "%d%%%s" (abs n) sign))))
+               (not (null current)))
       ;; If nudging by `N%' didn't work, try `N'.
       (volume-amixer-parse-output
        (volume-amixer-call "set" volume-amixer-current-channel
@@ -407,7 +494,7 @@ If OUTPUT cannot be parsed, raise an error."
   "Return the default channel for amixer."
   volume-amixer-default-channel)
 
-(defun volume-amixer-channel-name (channel)
+(defun volume-amixer-channel-label (channel)
   "Return the name of CHANNEL."
   channel)
 
@@ -443,9 +530,12 @@ Return either the new volume or nil, depending on the backend."
   "Retur the default channel."
   (volume-backend-call 'default-channel))
 
-(defun volume-channel-name (channel)
-  "Return the name of CHANNEL."
-  (volume-backend-call 'channel-name channel))
+(defun volume-channel-label (channel)
+  "Return the user-friendly name of CHANNEL."
+  (volume-backend-call 'channel-label channel))
+
+(define-obsolete-function-alias 'volume-channel-name
+  'volume-channel-label)
 
 (defun volume-channels ()
   "Return the list of available channels."
@@ -455,25 +545,29 @@ Return either the new volume or nil, depending on the backend."
   "Switch to the next channel."
   (interactive)
   (let* ((channels (volume-channels))
-         (channel (or (car-safe
-                       (cdr-safe
-                        (member (volume-current-channel) channels)))
-                      (car-safe channels))))
-    (if channel
-        (volume-switch-channel channel)
-      (volume-error "Channel list is empty"))))
+         (channel
+          (or (car-safe
+               (cdr-safe
+                (member (volume-current-channel) channels)))
+              (car-safe channels))))
+    (if (null channel)
+        (volume-error "Channel list is empty")
+      (volume-switch-channel channel)
+      (volume-update))))
 
 (defun volume-previous-channel ()
   "Switch to the previous channel."
   (interactive)
   (let* ((reverse-channels (reverse (volume-channels)))
-         (channel (or (car-safe
-                       (cdr-safe
-                        (member (volume-current-channel) reverse-channels)))
-                      (car-safe reverse-channels))))
-    (if channel
-        (volume-switch-channel channel)
-      (volume-error "Channel list is empty"))))
+         (channel
+          (or (car-safe
+               (cdr-safe
+                (member (volume-current-channel) reverse-channels)))
+              (car-safe reverse-channels))))
+    (if (null channel)
+        (volume-error "Channel list is empty")
+      (volume-switch-channel channel)
+      (volume-update))))
 
 (defun volume-show (&optional volume)
   "Display the current volume in the minibuffer.
@@ -482,39 +576,51 @@ If VOLUME is non-nil, take that to be the current volume."
   (message "Volume%s: %d%%"
            (if (equal (volume-current-channel)
                       (volume-default-channel)) ""
-             (concat " (" (volume-channel-name
+             (concat " (" (volume-channel-label
                            (volume-current-channel)) ")"))
            (or volume (round (volume-get)))))
+
+(defvar volume-redisplaying nil
+  "Non-nil in the dynamic scope of `volume-redisplay'.")
 
 (defun volume-redisplay (&optional volume)
   "Update the Volume buffer to reflect the current volume.
 If VOLUME is non-nil, take that to be the current volume."
   (interactive)
-  (when (null volume)
-    (setq volume (volume-get)))
-  (let ((inhibit-read-only t))
-    (set-buffer volume-buffer)
-    (delete-region (point-min) (point-max))
-    (insert "Volume")
-    (unless (equal (volume-current-channel)
-                   (volume-default-channel))
-      (insert " (" (volume-channel-name
-                    (volume-current-channel)) ")"))
-    (insert ": ")
-    (let* ((bar-start (point))
-           (available-width (- (window-width) bar-start))
-           (bar-width (round (* (/ volume 100.0) available-width)))
-           (label (format " %d%% " volume))
-           (label-width (length label)))
-      (insert-char ?\  available-width)
-      (goto-char
-       (+ bar-start
-          (if (< bar-width label-width) (1+ bar-width)
-            (/ (1+ (- bar-width label-width)) 2))))
-      (delete-char label-width) (insert label)
-      (put-text-property bar-start (+ bar-start bar-width)
-                         'face 'volume-bar)
-      (goto-char (+ bar-start bar-width)))))
+  (unless volume-redisplaying
+    (let ((volume-redisplaying t))
+      (when (null volume)
+        (setq volume (volume-get)))
+      (let ((inhibit-read-only t))
+        (set-buffer volume-buffer)
+        (delete-region (point-min) (point-max))
+        (insert "Volume")
+        (unless (equal (volume-current-channel)
+                       (volume-default-channel))
+          (insert " (" (volume-channel-label
+                        (volume-current-channel)) ")"))
+        (insert ": ")
+        (let* ((bar-start (point))
+               (available-width (- (window-width) bar-start))
+               (bar-width (if volume
+                              (round (* (/ volume 100.0) available-width))
+                            available-width))
+               (label (if volume
+                          (format " %d%% " volume)
+                        " (not available) "))
+               (label-width (length label)))
+          (insert-char ?\  available-width)
+          (goto-char
+           (+ bar-start
+              (if (< bar-width label-width) (1+ bar-width)
+                (/ (1+ (- bar-width label-width)) 2))))
+          (delete-char label-width)
+          (insert label)
+          (put-text-property bar-start (+ bar-start bar-width)
+                             'face (if volume
+                                       'volume-bar
+                                     'font-lock-warning))
+          (goto-char (+ bar-start bar-width)))))))
 
 (defun volume-update (&optional volume)
   "Maybe call `volume-show' or `volume-redisplay'; return VOLUME.
@@ -563,12 +669,12 @@ If N is negative, call `volume-raise' instead."
 (defun volume-minimize ()
   "Lower the volume as much as possible."
   (interactive)
-  (volume-set 0))
+  (volume-update (volume-set 0)))
 
 (defun volume-maximize ()
   "Raise the volume as much as possible."
   (interactive)
-  (volume-set 100))
+  (volume-update (volume-set 100)))
 
 (defun volume-assign-and-quit (&optional n)
   "Set the volume to N percent and then quit Volume mode.
@@ -642,6 +748,7 @@ If N is nil, just quit Volume mode."
     (define-key map "g" 'volume-redisplay)
     (define-key map "\C-m" 'volume-assign-and-quit)
     (define-key map "q" 'volume-quit)
+    (define-key map "\C-g" 'volume-quit)
     (define-key map [escape escape] 'volume-quit)
     map)
   "Keymap for Volume mode.")
