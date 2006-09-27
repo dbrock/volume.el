@@ -3,7 +3,7 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.8
+;; Version: 0.9
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
@@ -78,6 +78,20 @@ Electric mode saves some space, but uses its own command loop."
   '((t (:inverse-video t :weight bold)))
   "Face used for the indicator bar in Volume mode."
   :group 'volume)
+
+(defun volume-error (format &rest strings)
+  "Either signal a real error, or manually beep and display message.
+Real errors cannot be used in electric mode."
+  (if (or (not volume-electric-mode)
+          (null volume-buffer))
+      (apply 'error format strings)
+    (beep)
+    (with-current-buffer volume-buffer
+      (let ((inhibit-read-only t))
+        (delete-region (point-min) (point-max))
+        (insert (apply 'format format strings))
+        (sit-for 2)))
+    (volume-redisplay)))
 
 (defun volume-backend-call (primitive &rest arguments)
   "Call PRIMITIVE from the current backend with ARGUMENTS.
@@ -198,18 +212,21 @@ change `volume-aumix-channels' directly.")
 
 (defvar volume-aumix-available-channels
   (when (executable-find volume-aumix-program)
-    (let (result)
-      (with-temp-buffer
-        (volume-call-process volume-aumix-program "-q")
-        (while (re-search-forward "^\\S-+" nil t)
-          (let* ((channel-name (match-string 0))
-                 (channel (assoc channel-name volume-aumix-all-channels)))
-            (if channel
-                (when (cadr channel)
-                  (setq result (cons channel result)))
-              (message "Unrecognized aumix channel: `%s'"
-                       channel-name))))
-        (reverse result))))
+    (condition-case nil
+        (let (result)
+          (with-temp-buffer
+            (volume-call-process volume-aumix-program "-q")
+            (while (re-search-forward "^\\S-+" nil t)
+              (let* ((channel-name (match-string 0))
+                     (channel (assoc channel-name
+                                     volume-aumix-all-channels)))
+                (if channel
+                    (when (cadr channel)
+                      (setq result (cons channel result)))
+                  (message "Unrecognized aumix channel: `%s'"
+                           channel-name))))
+            (reverse result)))
+      (error nil)))
   "List of available aumix channels.
 You probably don't want to change this variable; instead,
 change `volume-aumix-channels'.")
@@ -383,16 +400,18 @@ This corresponds to the `-D' option of amixer."
 
 (defvar volume-amixer-available-channels
   (when (executable-find volume-amixer-program)
-    (let (result)
-      (with-temp-buffer
-        (volume-call-process volume-amixer-program)
-        (while (re-search-forward (concat "^\\s-*Capabilities: "
-                                          "\\<[a-z]*volume\\>")
-                                  nil 'noerror)
-          (save-excursion
-            (re-search-backward "^\\s-*Simple mixer control '\\(.*\\)'")
-            (setq result (cons (match-string 1) result)))))
-      result))
+    (condition-case nil
+        (let (result)
+          (with-temp-buffer
+            (volume-call-process volume-amixer-program)
+            (while (re-search-forward (concat "^\\s-*Capabilities: "
+                                              "\\<[a-z]*volume\\>")
+                                      nil 'noerror)
+              (save-excursion
+                (re-search-backward "^\\s-*Simple mixer control '\\(.*\\)'")
+                (setq result (cons (match-string 1) result)))))
+          result)
+      (error nil)))
   "List of available amixer channels.")
 
 (defcustom volume-amixer-channels
@@ -632,20 +651,6 @@ This function should be called by UI commands that change the volume."
         (unless volume-electric-mode
           (volume-redisplay volume))
       (volume-show volume))))
-
-(defun volume-error (format &rest strings)
-  "Either signal a real error, or manually beep and display message.
-Real errors cannot be used in electric mode."
-  (if (or (not volume-electric-mode)
-          (null volume-buffer))
-      (apply 'error format strings)
-    (beep)
-    (with-current-buffer volume-buffer
-      (let ((inhibit-read-only t))
-        (delete-region (point-min) (point-max))
-        (insert (apply 'format format strings))
-        (sit-for 2)))
-    (volume-redisplay)))
 
 (defun volume-assign (n)
   "Set the volume to N percent.
