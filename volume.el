@@ -48,6 +48,11 @@
 ;; straightforward.  And if you do, please consider sending
 ;; the code to me, so I can integrate it into this file.
 
+;;; Todo:
+
+;; Multiple ALSA mixer controls can have the same name;
+;; this situation messes everything up.  Deal with it.
+
 ;;; Code:
 
 (defgroup volume nil
