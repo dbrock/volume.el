@@ -7,7 +7,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: September 22, 2006
+;; Updated: November 21, 2006
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -758,6 +758,9 @@ If N is nil, just quit Volume mode."
     (define-key map "g" 'volume-redisplay)
     (define-key map "\C-m" 'volume-assign-and-quit)
     (define-key map "q" 'volume-quit)
+    ;; This is good when `volume' is bound to `v'.
+    ;; Then `v' can be used to toggle on or off.
+    (define-key map "v" 'volume-quit)
     (define-key map "\C-g" 'volume-quit)
     (define-key map [escape escape] 'volume-quit)
     map)
@@ -819,6 +822,7 @@ If N is nil, just quit Volume mode."
 ;;; time-stamp-format: "%:b %:d, %:y"
 ;;; time-stamp-start: ";; Updated: "
 ;;; time-stamp-end: "$"
+;;; time-stamp-line-limit: 20
 ;;; End:
 
 (provide 'volume)
