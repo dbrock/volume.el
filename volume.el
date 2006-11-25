@@ -3,11 +3,10 @@
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
-;; Version: 0.9
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: November 21, 2006
+;; Updated: November 25, 2006
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -535,7 +534,10 @@ If OUTPUT cannot be parsed, raise an error."
 
 (defun volume-set (n)
   "Set the volume to N percent."
-  (volume-backend-call 'set n))
+  (interactive "nSet volume (in percent): ")
+  (let ((new-value (volume-backend-call 'set n)))
+    (when (interactive-p)
+      (volume-show new-value))))
 
 (defun volume-nudge (n)
   "Change the volume by N percentage units.
@@ -666,6 +668,12 @@ If N is negative, call `volume-raise' instead."
         (volume-update (volume-set n)))
     (volume-error "Need integer argument")))
 
+(make-obsolete 'volume-assign
+               (concat "The digit keys now set the volume immediately, "
+                       "so this function is no longer needed.  "
+                       "Use `volume-set' to set the volume.")
+               "2006-11-25")
+
 (defun volume-lower (&optional n)
   "Lower the volume by N percentage units."
   (interactive "p")
@@ -676,15 +684,24 @@ If N is negative, call `volume-raise' instead."
   (interactive "p")
   (volume-update (volume-nudge (or n 1))))
 
-(defun volume-minimize ()
-  "Lower the volume as much as possible."
-  (interactive)
-  (volume-update (volume-set 0)))
+(defun volume-lower-more (&optional n)
+  "Lower the volume by 10 N percentage units."
+  (interactive "p")
+  (volume-lower (* n 10)))
 
-(defun volume-maximize ()
-  "Raise the volume as much as possible."
-  (interactive)
-  (volume-update (volume-set 100)))
+(defun volume-raise-more (&optional n)
+  "Raise the volume by 10 N percentage units."
+  (interactive "p")
+  (volume-raise (* n 10)))
+
+(dotimes (n 11)
+  (eval `(defun ,(intern (format "volume-set-to-%d%%" (* n 10))) ()
+           ,(format "Set the volume to %d%%." (* n 10))
+           (interactive)
+           (volume-update (volume-set ,(* n 10))))))
+
+(defalias 'volume-minimize 'volume-set-to-0%)
+(defalias 'volume-maximize 'volume-set-to-100%)
 
 (defun volume-assign-and-quit (&optional n)
   "Set the volume to N percent and then quit Volume mode.
@@ -694,6 +711,12 @@ If N is nil, just quit Volume mode."
     (volume-redisplay (volume-assign n))
     (sit-for 1))
   (volume-quit))
+
+(make-obsolete 'volume-assign-and-quit
+               (concat "The digit keys now set the volume immediately, "
+                       "so this function is no longer needed.  "
+                       "Use `volume-set' to set the volume.")
+               "2006-11-25")
 
 (defun volume-quit ()
   "Quit Volume mode."
@@ -720,33 +743,36 @@ If N is nil, just quit Volume mode."
   (run-mode-hooks 'volume-mode-hook))
 
 (defvar volume-mode-map
-  (let ((map (make-sparse-keymap))
-        (lower-more (lambda (n)
-                      (interactive "p")
-                      (volume-lower (* n 10))))
-        (raise-more (lambda (n)
-                      (interactive "p")
-                      (volume-raise (* n 10)))))
-    (suppress-keymap map)
+  (let ((map (make-sparse-keymap)))
+    (suppress-keymap map 'no-digits)
     (define-key map "b" 'volume-lower)
     (define-key map "f" 'volume-raise)
     (define-key map "\C-b" 'volume-lower)
     (define-key map "\C-f" 'volume-raise)
-    (define-key map "\M-b" lower-more)
-    (define-key map "\M-f" raise-more)
+    (define-key map "\M-b" 'volume-lower-more)
+    (define-key map "\M-f" 'volume-raise-more)
     (define-key map [left] 'volume-lower)
     (define-key map [right] 'volume-raise)
-    (define-key map [(control left)] lower-more)
-    (define-key map [(control right)] raise-more)
-    (define-key map [(meta left)] lower-more)
-    (define-key map [(meta right)] raise-more)
-    (define-key map "s" 'volume-assign)
+    (define-key map [(control left)] 'volume-lower-more)
+    (define-key map [(control right)] 'volume-raise-more)
+    (define-key map [(meta left)] 'volume-lower-more)
+    (define-key map [(meta right)] 'volume-raise-more)
     (define-key map "a" 'volume-minimize)
     (define-key map "e" 'volume-maximize)
     (define-key map "\C-a" 'volume-minimize)
     (define-key map "\C-e" 'volume-maximize)
     (define-key map [home] 'volume-minimize)
     (define-key map [end] 'volume-maximize)
+    (define-key map "1" 'volume-set-to-10%)
+    (define-key map "2" 'volume-set-to-20%)
+    (define-key map "3" 'volume-set-to-30%)
+    (define-key map "4" 'volume-set-to-40%)
+    (define-key map "5" 'volume-set-to-50%)
+    (define-key map "6" 'volume-set-to-60%)
+    (define-key map "7" 'volume-set-to-70%)
+    (define-key map "8" 'volume-set-to-80%)
+    (define-key map "9" 'volume-set-to-90%)
+    (define-key map "0" 'volume-set-to-100%)
     (define-key map "n" 'volume-next-channel)
     (define-key map "p" 'volume-previous-channel)
     (define-key map "\C-n" 'volume-next-channel)
@@ -756,7 +782,7 @@ If N is nil, just quit Volume mode."
     (define-key map [up] 'volume-next-channel)
     (define-key map [down] 'volume-previous-channel)
     (define-key map "g" 'volume-redisplay)
-    (define-key map "\C-m" 'volume-assign-and-quit)
+    (define-key map "\C-m" 'volume-quit)
     (define-key map "q" 'volume-quit)
     ;; This is good when `volume' is bound to `v'.
     ;; Then `v' can be used to toggle on or off.
