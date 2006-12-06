@@ -6,7 +6,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: November 25, 2006
+;; Updated: December 6, 2006
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -739,6 +739,7 @@ If N is nil, just quit Volume mode."
   (setq major-mode 'volume-mode)
   (setq mode-name "Volume")
   (use-local-map volume-mode-map)
+  (setq buffer-undo-list t)
   (volume-update)
   (run-mode-hooks 'volume-mode-hook))
 
