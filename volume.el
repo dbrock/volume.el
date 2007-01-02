@@ -1,12 +1,12 @@
 ;;; volume.el --- tweak your sound card volume from Emacs
-;; Copyright (C) 2005, 2006  Daniel Brockman
+;; Copyright (C) 2005, 2006, 2007  Daniel Brockman
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: December 6, 2006
+;; Updated: January 2, 2007
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -100,7 +100,7 @@ Real errors cannot be used in electric mode."
 (defun volume-backend-call (primitive &rest arguments)
   "Call PRIMITIVE from the current backend with ARGUMENTS.
 See the variable `volume-backend'."
-  (let ((backend (symbol-value (indirect-variable volume-backend))))
+  (let ((backend (symbol-value volume-backend)))
     (when (null backend)
       (volume-error "No backend (see `volume-backend')"))
     (let ((function (cdr (assoc primitive backend))))
@@ -447,8 +447,9 @@ This corresponds to the `-D' option of amixer."
                 (string :tag "Other"))
   :group 'volume-amixer)
 
-(define-obsolete-variable-alias 'volume-amixer-control
-  'volume-amixer-default-channel)
+(when (fboundp 'define-obsolete-variable-alias)
+  (define-obsolete-variable-alias 'volume-amixer-control
+    'volume-amixer-default-channel))
 
 (defvar volume-amixer-current-channel volume-amixer-default-channel
   "The name of the ALSA mixer channel to manipulate.")
@@ -560,8 +561,9 @@ Return either the new volume or nil, depending on the backend."
   "Return the user-friendly name of CHANNEL."
   (volume-backend-call 'channel-label channel))
 
-(define-obsolete-function-alias 'volume-channel-name
-  'volume-channel-label)
+(when (fboundp 'define-obsolete-function-alias)
+  (define-obsolete-function-alias 'volume-channel-name
+    'volume-channel-label))
 
 (defun volume-channels ()
   "Return the list of available channels."
