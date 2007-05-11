@@ -6,7 +6,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: January 2, 2007
+;; Updated: May 10, 2007
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -23,18 +23,16 @@
 ;; Software Foundation, 51 Franklin Street, Fifth Floor,
 ;; Boston, MA 02110-1301, USA.
 
-;;; Installation:
+;;; Commentary:
 
 ;; To use this program, put this file in your `load-path',
 ;; and put the following autoload in your ~/.emacs:
-
+;;
 ;;   (autoload 'volume "volume"
 ;;     "Tweak your sound card volume." t)
-
-;; Then type M-x volume RET to run the program.  Of course,
-;; use M-x customize-group RET volume RET to customize it.
-
-;;; Commentary:
+;;
+;; Then type `M-x volume <RET>' to run the program.  Of course,
+;; use `M-x customize-group <RET> volume <RET>' to customize it.
 
 ;; Tweaking the volume of my music used to be one of the
 ;; few things I constantly went outside of Emacs to do.
@@ -47,7 +45,7 @@
 ;; straightforward.  And if you do, please consider sending
 ;; the code to me, so I can integrate it into this file.
 
-;;; Todo:
+;;; TODO:
 
 ;; Multiple ALSA mixer controls can have the same name;
 ;; this situation messes everything up.  Deal with it.
@@ -611,6 +609,72 @@ If VOLUME is non-nil, take that to be the current volume."
 (defvar volume-redisplaying nil
   "Non-nil in the dynamic scope of `volume-redisplay'.")
 
+(defvar volume-bar-start nil
+  "Character position of the start of the volume bar.")
+(make-variable-buffer-local 'volume-bar-start)
+
+(defun volume-mouse-motion (event left right)
+  (let ((window (posn-window (event-end event))))
+    (when (windowp window)
+      (let* ((x (+ (car (posn-x-y (event-end event)))
+                   (car (window-inside-pixel-edges window)))))
+        (volume-update
+         (volume-set
+          (/ (* 100.0 (- (max left (min x right)) left))
+             (- right left))))))))
+
+(defun volume-mouse-down (event)
+  (interactive "@e")
+  (let* ((window (posn-window (event-end event)))
+         (buffer (and window (window-buffer window))))
+    (when (and buffer (eq buffer volume-buffer))
+      (with-current-buffer volume-buffer
+        (catch 'abort
+          (let* ((edges (window-inside-pixel-edges
+                         (posn-window (event-end event))))
+                 (left (+ (car (posn-x-y (or (posn-at-point volume-bar-start)
+                                             (throw 'abort nil))))
+                          (nth 0 edges)))
+                 (right (nth 2 edges)))
+            (volume-mouse-motion event left right)
+            (track-mouse
+              (let ((volume-tracking-mouse t))
+                (while (progn (setq event (read-event))
+                              (not (eq (event-basic-type event) 'mouse-1)))
+                  (when (mouse-movement-p event)
+                    (volume-mouse-motion event left right)))))))))))
+
+(defun volume-electric-mouse-down (event)
+  ;; For some reason, "@e" does not work in electric mode.
+  (interactive "e")
+  (volume-mouse-down event))
+
+(defvar volume-label-map
+  (let ((map (make-sparse-keymap)))
+    (prog1 map
+      (define-key map [mouse-1]
+        (lambda (e)
+          (interactive "e")
+          (volume-next-channel)))
+      (define-key map [mouse-2]
+        (lambda (e)
+          (interactive "e")
+          (volume-next-channel)))
+      (define-key map [mouse-3]
+        (lambda (e)
+          (interactive "e")
+          (volume-previous-channel))))))
+
+(defvar volume-bar-map
+  (let ((map (make-sparse-keymap)))
+    (prog1 map
+      (define-key map [down-mouse-1] 'volume-mouse-down))))
+
+(defvar volume-electric-bar-map
+  (let ((map (make-sparse-keymap)))
+    (prog1 map
+      (define-key map [down-mouse-1] 'volume-electric-mouse-down))))
+
 (defun volume-redisplay (&optional volume)
   "Update the Volume buffer to reflect the current volume.
 If VOLUME is non-nil, take that to be the current volume."
@@ -627,6 +691,13 @@ If VOLUME is non-nil, take that to be the current volume."
                        (volume-default-channel))
           (insert " (" (volume-channel-label
                         (volume-current-channel)) ")"))
+        (when (> (length (volume-channels)) 1)
+          (add-text-properties
+           (point-min) (point-max)
+           (list 'mouse-face 'highlight
+                 'keymap volume-label-map
+                 'help-echo (concat "mouse-1: next channel\n"
+                                    "mouse-3: previous channel"))))
         (insert ": ")
         (let* ((bar-start (point))
                (available-width (- (window-width) bar-start))
@@ -637,6 +708,7 @@ If VOLUME is non-nil, take that to be the current volume."
                           (format " %d%% " volume)
                         " (not available) "))
                (label-width (length label)))
+          (setq volume-bar-start bar-start)
           (insert-char ?\  available-width)
           (goto-char
            (+ bar-start
@@ -648,7 +720,16 @@ If VOLUME is non-nil, take that to be the current volume."
                              'face (if volume
                                        'volume-bar
                                      'font-lock-warning))
+          (when volume
+            (add-text-properties bar-start (point-max)
+                                 (list 'pointer 'hdrag
+                                       'keymap (if volume-electric-mode
+                                                   volume-electric-bar-map
+                                                 volume-bar-map))))
           (goto-char (+ bar-start bar-width)))))))
+
+(defvar volume-tracking-mouse nil
+  "Non-nil when tracking the mouse.")
 
 (defun volume-update (&optional volume)
   "Maybe call `volume-show' or `volume-redisplay'; return VOLUME.
@@ -657,7 +738,8 @@ This function should be called by UI commands that change the volume."
     (if volume-buffer
         ;; The electric command loop will trigger a redisplay
         ;; after each command anyway, so avoid doing it twice.
-        (unless volume-electric-mode
+        (unless (and volume-electric-mode
+                     (not volume-tracking-mouse))
           (volume-redisplay volume))
       (volume-show volume))))
 
@@ -686,15 +768,31 @@ If N is negative, call `volume-raise' instead."
   (interactive "p")
   (volume-update (volume-nudge (or n 1))))
 
-(defun volume-lower-more (&optional n)
+(defun volume-lower-10 (&optional n)
   "Lower the volume by 10 N percentage units."
   (interactive "p")
   (volume-lower (* n 10)))
 
-(defun volume-raise-more (&optional n)
+(defalias 'volume-lower-more 'volume-lower-10)
+(make-obsolete 'volume-lower-more 'volume-lower-10)
+
+(defun volume-raise-10 (&optional n)
   "Raise the volume by 10 N percentage units."
   (interactive "p")
   (volume-raise (* n 10)))
+
+(defalias 'volume-raise-more 'volume-raise-10)
+(make-obsolete 'volume-raise-more 'volume-raise-10)
+
+(defun volume-lower-50 (&optional n)
+  "Lower the volume by 50 N percentage units."
+  (interactive "p")
+  (volume-lower (* n 50)))
+
+(defun volume-raise-50 (&optional n)
+  "Raise the volume by 50 N percentage units."
+  (interactive "p")
+  (volume-raise (* n 50)))
 
 (dotimes (n 11)
   (eval `(defun ,(intern (format "volume-set-to-%d%%" (* n 10))) ()
@@ -746,26 +844,46 @@ If N is nil, just quit Volume mode."
   (run-mode-hooks 'volume-mode-hook))
 
 (defvar volume-mode-map
-  (let ((map (make-sparse-keymap)))
+  (let ((map (make-sparse-keymap))
+        (select-window (lambda (e) (interactive "@e"))))
     (suppress-keymap map 'no-digits)
+    (define-key map [mouse-1] select-window)
+    (define-key map [drag-mouse-1] select-window)
+    (define-key map [mouse-2] select-window)
+    (define-key map [drag-mouse-2] select-window)
+    (define-key map [mouse-3] select-window)
+    (define-key map [drag-mouse-3] select-window)
+    (define-key map [left-fringe mouse-1] 'volume-minimize)
+    (define-key map [right-fringe mouse-1] 'volume-maximize)
+    (define-key map [left-fringe mouse-2] 'volume-minimize)
+    (define-key map [right-fringe mouse-2] 'volume-maximize)
+    (define-key map [left-fringe mouse-3] select-window)
+    (define-key map [right-fringe mouse-3] select-window)
     (define-key map "b" 'volume-lower)
     (define-key map "f" 'volume-raise)
     (define-key map "\C-b" 'volume-lower)
     (define-key map "\C-f" 'volume-raise)
-    (define-key map "\M-b" 'volume-lower-more)
-    (define-key map "\M-f" 'volume-raise-more)
+    (define-key map [mouse-4] 'volume-raise)
+    (define-key map [mouse-5] 'volume-lower)
+    (define-key map "\M-b" 'volume-lower-10)
+    (define-key map "\M-f" 'volume-raise-10)
+    (define-key map "\C-\M-b" 'volume-lower-50)
+    (define-key map "\C-\M-f" 'volume-raise-50)
     (define-key map [left] 'volume-lower)
     (define-key map [right] 'volume-raise)
-    (define-key map [(control left)] 'volume-lower-more)
-    (define-key map [(control right)] 'volume-raise-more)
-    (define-key map [(meta left)] 'volume-lower-more)
-    (define-key map [(meta right)] 'volume-raise-more)
+    (define-key map [(control left)] 'volume-lower-10)
+    (define-key map [(control right)] 'volume-raise-10)
+    (define-key map [(meta left)] 'volume-lower-10)
+    (define-key map [(meta right)] 'volume-raise-10)
+    (define-key map [(control meta left)] 'volume-lower-50)
+    (define-key map [(control meta right)] 'volume-raise-50)
     (define-key map "a" 'volume-minimize)
     (define-key map "e" 'volume-maximize)
     (define-key map "\C-a" 'volume-minimize)
     (define-key map "\C-e" 'volume-maximize)
     (define-key map [home] 'volume-minimize)
     (define-key map [end] 'volume-maximize)
+    (define-key map "`" 'volume-set-to-0%)
     (define-key map "1" 'volume-set-to-10%)
     (define-key map "2" 'volume-set-to-20%)
     (define-key map "3" 'volume-set-to-30%)
@@ -795,54 +913,70 @@ If N is nil, just quit Volume mode."
     map)
   "Keymap for Volume mode.")
 
+(defvar volume-electric-mode-map
+  (let ((map (make-sparse-keymap)))
+    (prog1 map
+      (set-keymap-parent map volume-mode-map)
+      (define-key map [mouse-1] 'volume-quit) 
+      (define-key map [mode-line mouse-1] 'volume-quit) 
+      (define-key map [mouse-2] 'volume-quit) 
+      (define-key map [mode-line mouse-2] 'volume-quit) 
+      (define-key map [mouse-3] 'volume-quit) 
+      (define-key map [mode-line mouse-3] 'volume-quit)))
+  "Keymap for electric Volume mode.")
+
+(defvar volume-running-electric-command-loop nil
+  "Non-nil when Volume is running an electric command loop.")
+
 ;; This function was based on the function `calculator' from
 ;; calculator.el, which is copyrighted by the FSF.
 ;;;###autoload
 (defun volume ()
   "Tweak your sound card volume."
   (interactive)
-  (setq volume-buffer (get-buffer-create "*volume*"))
+  (setq volume-buffer (get-buffer-create "*Volume*"))
   (if volume-electric-mode
-      (unwind-protect
-          (save-window-excursion
-            (require 'electric) (message nil)
-            (let ((echo-keystrokes 0)
-                  (garbage-collection-messages nil))
-              (set-window-buffer (minibuffer-window) volume-buffer)
-              (select-window (minibuffer-window))
-              (let ((old-local-map (current-local-map))
-                    (old-global-map (current-global-map)))
-                (use-local-map nil)
-                (use-global-map volume-mode-map)
-                (unwind-protect
-                    (progn
-                      (volume-redisplay)
-                      (run-hooks 'volume-mode-hook)
-                      (catch 'volume-done
-                        (Electric-command-loop
-                         'volume-done
-                         ;; Avoid `noprompt' due to
-                         ;; a bug in electric.el.
-                         '(lambda () 'noprompt)
-                         nil
-                         (lambda (x y) (volume-redisplay)))))
-                  (use-local-map old-local-map)
-                  (use-global-map old-global-map)))))
-        (when volume-buffer
-          (kill-buffer volume-buffer)
-          (setq volume-buffer nil)))
-    (cond
-     ((null (get-buffer-window volume-buffer))
-      (let ((window-min-height 2)
-            (split-window-keep-point nil))
-        (select-window
-         (split-window-vertically
-          (if (and (fboundp 'face-attr-construct)
-                   (plist-get (face-attr-construct 'modeline) :box))
-              -3 -2)))
-        (switch-to-buffer volume-buffer)))
-     ((not (eq (current-buffer) volume-buffer))
-      (select-window (get-buffer-window volume-buffer))))
+      (unless volume-running-electric-command-loop
+        (unwind-protect
+            (save-window-excursion
+              (require 'electric) (message nil)
+              (let ((echo-keystrokes 0)
+                    (garbage-collection-messages nil))
+                (set-window-buffer (minibuffer-window) volume-buffer)
+                (select-window (minibuffer-window))
+                (let ((old-local-map (current-local-map))
+                      (old-global-map (current-global-map)))
+                  (use-local-map nil)
+                  (use-global-map volume-electric-mode-map)
+                  (unwind-protect
+                      (progn
+                        (volume-redisplay)
+                        (run-hooks 'volume-mode-hook)
+                        (catch 'volume-done
+                          (let ((volume-running-electric-command-loop t))
+                            (Electric-command-loop
+                             'volume-done
+                             ;; Avoid `noprompt' due to
+                             ;; a bug in electric.el.
+                             (lambda () 'noprompt)
+                             nil
+                             (lambda (x y) (volume-redisplay))))))
+                    (use-local-map old-local-map)
+                    (use-global-map old-global-map)))))
+          (when volume-buffer
+            (kill-buffer volume-buffer)
+            (setq volume-buffer nil))))
+    (cond ((null (get-buffer-window volume-buffer))
+           (let ((window-min-height 2)
+                 (split-window-keep-point nil))
+             (select-window
+              (split-window-vertically
+               (if (and (fboundp 'face-attr-construct)
+                        (plist-get (face-attr-construct 'modeline) :box))
+                   -3 -2)))
+             (switch-to-buffer volume-buffer)))
+          ((not (eq (current-buffer) volume-buffer))
+           (select-window (get-buffer-window volume-buffer))))
     (volume-mode)
     (setq buffer-read-only t)))
 
