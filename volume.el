@@ -1,12 +1,13 @@
 ;;; volume.el --- tweak your sound card volume from Emacs
-;; Copyright (C) 2005, 2006, 2007  Daniel Brockman
+;; Copyright (C) 2005, 2006, 2007, 2008  Daniel Brockman
 ;; Copyright (C) 1998, 2000, 2001, 2002, 2003, 2004, 2005
 ;;   Free Software Foundation, Inc.
 
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: May 10, 2007
+;; Updated: August 27, 2008
+;; Version: 1.0
 
 ;; This file is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
