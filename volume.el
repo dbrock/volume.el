@@ -973,7 +973,7 @@ If N is nil, just quit Volume mode."
              (select-window
               (split-window-vertically
                (if (and (fboundp 'face-attr-construct)
-                        (plist-get (face-attr-construct 'modeline) :box))
+                        (plist-get (face-attr-construct 'mode-line) :box))
                    -3 -2)))
              (switch-to-buffer volume-buffer)))
           ((not (eq (current-buffer) volume-buffer))
