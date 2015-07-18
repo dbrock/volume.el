@@ -59,7 +59,8 @@
 
 (defcustom volume-backend
   (cond ((executable-find "aumix") 'volume-aumix-backend)
-        ((executable-find "amixer") 'volume-amixer-backend))
+        ((executable-find "amixer") 'volume-amixer-backend)
+        ((executable-find "osascript") 'volume-osascript-backend))
   "The set of primitives used by Volume to do real work.
 Value is an alist containing entries `get', `set', `nudge',
 `current-channel', `switch-channel', `default-channel',
@@ -67,6 +68,7 @@ Value is an alist containing entries `get', `set', `nudge',
 containing such an alist."
   :type '(radio (const :tag "aumix" volume-aumix-backend)
                 (const :tag "amixer" volume-amixer-backend)
+                (const :tag "osascript" volume-osascript-backend)
                 (const :tag "None" nil)
                 (variable :tag "Custom"))
   :group 'volume)
@@ -524,6 +526,48 @@ If OUTPUT cannot be parsed, raise an error."
 (defun volume-amixer-channels ()
   "Return the list of available channels for amixer."
   volume-amixer-channels)
+
+
+;;;; The osascript backend
+
+;;; This uses osascript to change the volume on OS X.
+;;; Tested on 10.10 (Yosemite).
+
+(defvar volume-osascript-backend
+  '((get . volume-osascript-get)
+    (set . volume-osascript-set)
+    (nudge . volume-osascript-nudge)
+    (current-channel . volume-osascript-current-channel)
+    (default-channel . volume-osascript-default-channel)
+    (channels . volume-osascript-channels)))
+
+(defun volume-osascript-get ()
+  "Return the current volume, using osascript to get it."
+  (string-to-number
+   (volume-call-process-to-string
+    "osascript" "-e" "get output volume of (get volume settings)")))
+
+(defun volume-osascript-set (n)
+  "Use osascript to set the current volume to N percent."
+  (volume-call-process "osascript" "-e" (format "set volume output volume %s" n))
+  (volume-osascript-get))
+
+(defun volume-osascript-nudge (n)
+  "Use osascript to change the volume by N percentage units."
+  (volume-osascript-set (+ n (volume-osascript-get))))
+
+(defun volume-osascript-current-channel ()
+  "Return the current channel for osascript."
+  "output")
+
+(defun volume-osascript-default-channel ()
+  "Return the default channel for osascript."
+  "output")
+
+(defun volume-osascript-channels ()
+  "Return the list of available channels for osascript."
+  ;; TODO: also "alert"?
+  '("output"))
 
 
 ;;;; User interface
