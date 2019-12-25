@@ -494,18 +494,10 @@ If OUTPUT cannot be parsed, raise an error."
 
 (defun volume-amixer-nudge (n)
   "Use amixer to change the volume by N percentage units."
-  (let ((sign (if (>= n 0) "+" "-"))
-        (current (volume-amixer-get)))
-    (when (and (equal current
-                      (volume-amixer-parse-output
-                       (volume-amixer-call
-                        "set" volume-amixer-current-channel
-                        (format "%d%%%s" (abs n) sign))))
-               (not (null current)))
-      ;; If nudging by `N%' didn't work, try `N'.
-      (volume-amixer-parse-output
-       (volume-amixer-call "set" volume-amixer-current-channel
-                           (format "%d%s" (abs n) sign))))))
+  (volume-amixer-parse-output
+   (volume-amixer-call
+    "set" volume-amixer-current-channel
+    (format "%d%%" (min 100 (max 0 (+ n (volume-amixer-get))))))))
 
 (defun volume-amixer-current-channel ()
   "Return the current channel for amixer."
