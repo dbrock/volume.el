@@ -60,7 +60,8 @@
 (defcustom volume-backend
   (cond ((executable-find "aumix") 'volume-aumix-backend)
         ((executable-find "amixer") 'volume-amixer-backend)
-        ((executable-find "osascript") 'volume-osascript-backend))
+        ((executable-find "osascript") 'volume-osascript-backend)
+        ((executable-find "mixer") 'volume-mixer-backend))
   "The set of primitives used by Volume to do real work.
 Value is an alist containing entries `get', `set', `nudge',
 `current-channel', `switch-channel', `default-channel',
@@ -69,6 +70,7 @@ containing such an alist."
   :type '(radio (const :tag "aumix" volume-aumix-backend)
                 (const :tag "amixer" volume-amixer-backend)
                 (const :tag "osascript" volume-osascript-backend)
+                (const :tag "mixer" volume-mixer-backend)
                 (const :tag "None" nil)
                 (variable :tag "Custom"))
   :group 'volume)
@@ -560,6 +562,60 @@ If OUTPUT cannot be parsed, raise an error."
   "Return the list of available channels for osascript."
   ;; TODO: also "alert"?
   '("output"))
+
+
+;;;; The mixer backend
+
+;;; This uses mixer to change the volume on BSD.
+
+(defvar volume-mixer-backend
+  '((get . volume-mixer-get)
+    (set . volume-mixer-set)
+    (nudge . volume-mixer-nudge)
+    (current-channel . volume-mixer-current-channel)
+    (default-channel . volume-mixer-default-channel)
+    (channels . volume-mixer-channels)))
+
+(defun volume-mixer-call (&rest arguments)
+  "Call mixer with ARGUMENTS and return the output."
+  (apply 'volume-call-process-to-string "mixer"
+         (append arguments)))
+
+(defun volume-mixer-parse-output (output)
+  "Parse the OUTPUT of a mixer volume query.
+Return the volume percentage as a floating-point number.
+If OUTPUT cannot be parsed, raise an error."
+  (when output
+    (if (string-match ":\\([0-9]+\\)[.\\n]*$" output)
+        (float (string-to-number (match-string 1 output)))
+      (volume-error "Failed to parse mixer output"))))
+
+(defun volume-mixer-get ()
+  "Return the current volume, using mixer to get it."
+  (volume-mixer-parse-output
+   (volume-mixer-call "vol")))
+   
+(defun volume-mixer-set (n)
+  "Use mixer to set the current volume to N percent."
+  (volume-mixer-parse-output
+   (volume-mixer-call "vol" (format "%d" n))))
+
+(defun volume-mixer-nudge (n)
+  "Use mixer to change the volume by N percentage units."
+  (volume-mixer-set (min 100 (max 0 (+ n (volume-mixer-get))))))
+
+(defun volume-mixer-current-channel ()
+  "Return the current channel for mixer."
+  "vol")
+
+(defun volume-mixer-default-channel ()
+  "Return the default channel for mixer."
+  "vol")
+
+(defun volume-mixer-channels ()
+  "Return the list of available channels for mixer."
+  ;; TODO: also "alert"?
+  '("vol"))
 
 
 ;;;; User interface
