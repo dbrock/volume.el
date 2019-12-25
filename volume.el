@@ -6,7 +6,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: August 27, 2008
+;; Updated: December 25, 2019
 ;; Version: 1.0
 
 ;; This file is free software; you can redistribute it and/or
@@ -816,7 +816,7 @@ If N is negative, call `volume-raise' instead."
 (defun volume-lower-10 (&optional n)
   "Lower the volume by 10 N percentage units."
   (interactive "p")
-  (volume-lower (* n 10)))
+  (volume-lower (* (or n 1) 10)))
 
 (defalias 'volume-lower-more 'volume-lower-10)
 (make-obsolete 'volume-lower-more 'volume-lower-10)
@@ -824,7 +824,7 @@ If N is negative, call `volume-raise' instead."
 (defun volume-raise-10 (&optional n)
   "Raise the volume by 10 N percentage units."
   (interactive "p")
-  (volume-raise (* n 10)))
+  (volume-raise (* (or n 1) 10)))
 
 (defalias 'volume-raise-more 'volume-raise-10)
 (make-obsolete 'volume-raise-more 'volume-raise-10)
@@ -832,12 +832,12 @@ If N is negative, call `volume-raise' instead."
 (defun volume-lower-50 (&optional n)
   "Lower the volume by 50 N percentage units."
   (interactive "p")
-  (volume-lower (* n 50)))
+  (volume-lower (* (or n 1) 50)))
 
 (defun volume-raise-50 (&optional n)
   "Raise the volume by 50 N percentage units."
   (interactive "p")
-  (volume-raise (* n 50)))
+  (volume-raise (* (or n 1) 50)))
 
 (dotimes (n 11)
   (eval `(defun ,(intern (format "volume-set-to-%d%%" (* n 10))) ()
