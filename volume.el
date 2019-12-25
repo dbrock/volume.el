@@ -628,7 +628,7 @@ If OUTPUT cannot be parsed, raise an error."
   "Set the volume to N percent."
   (interactive "nSet volume (in percent): ")
   (let ((new-value (volume-backend-call 'set n)))
-    (when (interactive-p)
+    (when (called-interactively-p 'any)
       (volume-show new-value))))
 
 (defun volume-nudge (n)
@@ -867,7 +867,7 @@ If N is negative, call `volume-raise' instead."
   (volume-lower (* (or n 1) 10)))
 
 (defalias 'volume-lower-more 'volume-lower-10)
-(make-obsolete 'volume-lower-more 'volume-lower-10)
+(make-obsolete 'volume-lower-more 'volume-lower-10 "2007-05-11")
 
 (defun volume-raise-10 (&optional n)
   "Raise the volume by 10 N percentage units."
@@ -875,7 +875,7 @@ If N is negative, call `volume-raise' instead."
   (volume-raise (* (or n 1) 10)))
 
 (defalias 'volume-raise-more 'volume-raise-10)
-(make-obsolete 'volume-raise-more 'volume-raise-10)
+(make-obsolete 'volume-raise-more 'volume-raise-10 "2007-05-11")
 
 (defun volume-lower-50 (&optional n)
   "Lower the volume by 50 N percentage units."
