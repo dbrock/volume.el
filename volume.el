@@ -6,7 +6,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: August 27, 2008
+;; Updated: December 25, 2019
 ;; Version: 1.0
 
 ;; This file is free software; you can redistribute it and/or
@@ -60,7 +60,8 @@
 (defcustom volume-backend
   (cond ((executable-find "aumix") 'volume-aumix-backend)
         ((executable-find "amixer") 'volume-amixer-backend)
-        ((executable-find "osascript") 'volume-osascript-backend))
+        ((executable-find "osascript") 'volume-osascript-backend)
+        ((executable-find "mixer") 'volume-mixer-backend))
   "The set of primitives used by Volume to do real work.
 Value is an alist containing entries `get', `set', `nudge',
 `current-channel', `switch-channel', `default-channel',
@@ -69,6 +70,7 @@ containing such an alist."
   :type '(radio (const :tag "aumix" volume-aumix-backend)
                 (const :tag "amixer" volume-amixer-backend)
                 (const :tag "osascript" volume-osascript-backend)
+                (const :tag "mixer" volume-mixer-backend)
                 (const :tag "None" nil)
                 (variable :tag "Custom"))
   :group 'volume)
@@ -494,18 +496,10 @@ If OUTPUT cannot be parsed, raise an error."
 
 (defun volume-amixer-nudge (n)
   "Use amixer to change the volume by N percentage units."
-  (let ((sign (if (>= n 0) "+" "-"))
-        (current (volume-amixer-get)))
-    (when (and (equal current
-                      (volume-amixer-parse-output
-                       (volume-amixer-call
-                        "set" volume-amixer-current-channel
-                        (format "%d%%%s" (abs n) sign))))
-               (not (null current)))
-      ;; If nudging by `N%' didn't work, try `N'.
-      (volume-amixer-parse-output
-       (volume-amixer-call "set" volume-amixer-current-channel
-                           (format "%d%s" (abs n) sign))))))
+  (volume-amixer-parse-output
+   (volume-amixer-call
+    "set" volume-amixer-current-channel
+    (format "%d%%" (min 100 (max 0 (+ n (volume-amixer-get))))))))
 
 (defun volume-amixer-current-channel ()
   "Return the current channel for amixer."
@@ -570,6 +564,60 @@ If OUTPUT cannot be parsed, raise an error."
   '("output"))
 
 
+;;;; The mixer backend
+
+;;; This uses mixer to change the volume on BSD.
+
+(defvar volume-mixer-backend
+  '((get . volume-mixer-get)
+    (set . volume-mixer-set)
+    (nudge . volume-mixer-nudge)
+    (current-channel . volume-mixer-current-channel)
+    (default-channel . volume-mixer-default-channel)
+    (channels . volume-mixer-channels)))
+
+(defun volume-mixer-call (&rest arguments)
+  "Call mixer with ARGUMENTS and return the output."
+  (apply 'volume-call-process-to-string "mixer"
+         (append arguments)))
+
+(defun volume-mixer-parse-output (output)
+  "Parse the OUTPUT of a mixer volume query.
+Return the volume percentage as a floating-point number.
+If OUTPUT cannot be parsed, raise an error."
+  (when output
+    (if (string-match ":\\([0-9]+\\)[.\\n]*$" output)
+        (float (string-to-number (match-string 1 output)))
+      (volume-error "Failed to parse mixer output"))))
+
+(defun volume-mixer-get ()
+  "Return the current volume, using mixer to get it."
+  (volume-mixer-parse-output
+   (volume-mixer-call "vol")))
+   
+(defun volume-mixer-set (n)
+  "Use mixer to set the current volume to N percent."
+  (volume-mixer-parse-output
+   (volume-mixer-call "vol" (format "%d" n))))
+
+(defun volume-mixer-nudge (n)
+  "Use mixer to change the volume by N percentage units."
+  (volume-mixer-set (min 100 (max 0 (+ n (volume-mixer-get))))))
+
+(defun volume-mixer-current-channel ()
+  "Return the current channel for mixer."
+  "vol")
+
+(defun volume-mixer-default-channel ()
+  "Return the default channel for mixer."
+  "vol")
+
+(defun volume-mixer-channels ()
+  "Return the list of available channels for mixer."
+  ;; TODO: also "alert"?
+  '("vol"))
+
+
 ;;;; User interface
 
 (defun volume-get ()
@@ -580,7 +628,7 @@ If OUTPUT cannot be parsed, raise an error."
   "Set the volume to N percent."
   (interactive "nSet volume (in percent): ")
   (let ((new-value (volume-backend-call 'set n)))
-    (when (interactive-p)
+    (when (called-interactively-p 'any)
       (volume-show new-value))))
 
 (defun volume-nudge (n)
@@ -816,28 +864,28 @@ If N is negative, call `volume-raise' instead."
 (defun volume-lower-10 (&optional n)
   "Lower the volume by 10 N percentage units."
   (interactive "p")
-  (volume-lower (* n 10)))
+  (volume-lower (* (or n 1) 10)))
 
 (defalias 'volume-lower-more 'volume-lower-10)
-(make-obsolete 'volume-lower-more 'volume-lower-10)
+(make-obsolete 'volume-lower-more 'volume-lower-10 "2007-05-11")
 
 (defun volume-raise-10 (&optional n)
   "Raise the volume by 10 N percentage units."
   (interactive "p")
-  (volume-raise (* n 10)))
+  (volume-raise (* (or n 1) 10)))
 
 (defalias 'volume-raise-more 'volume-raise-10)
-(make-obsolete 'volume-raise-more 'volume-raise-10)
+(make-obsolete 'volume-raise-more 'volume-raise-10 "2007-05-11")
 
 (defun volume-lower-50 (&optional n)
   "Lower the volume by 50 N percentage units."
   (interactive "p")
-  (volume-lower (* n 50)))
+  (volume-lower (* (or n 1) 50)))
 
 (defun volume-raise-50 (&optional n)
   "Raise the volume by 50 N percentage units."
   (interactive "p")
-  (volume-raise (* n 50)))
+  (volume-raise (* (or n 1) 50)))
 
 (dotimes (n 11)
   (eval `(defun ,(intern (format "volume-set-to-%d%%" (* n 10))) ()
