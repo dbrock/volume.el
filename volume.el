@@ -6,7 +6,7 @@
 ;; Author: Daniel Brockman <daniel@brockman.se>
 ;; URL: http://www.brockman.se/software/volume-el/
 ;; Created: September 9, 2005
-;; Updated: December 25, 2019
+;; Updated: September 13, 2020
 ;; Version: 1.0
 
 ;; This file is free software; you can redistribute it and/or
@@ -402,7 +402,7 @@ This corresponds to the `-D' option of amixer."
   :group 'volume-amixer)
 
 (defvar volume-amixer-default-channels
-  '("Master" "Bass" "Treble" "PCM" "Line")
+  '("Master" "Bass" "Treble" "PCM" "Line" "Headphone")
   "The default value of `volume-amixer-channels'.")
 
 (defvar volume-amixer-available-channels
