@@ -452,7 +452,7 @@ This corresponds to the `-D' option of amixer."
 
 (when (fboundp 'define-obsolete-variable-alias)
   (define-obsolete-variable-alias 'volume-amixer-control
-    'volume-amixer-default-channel))
+    'volume-amixer-default-channel "2007-01-02"))
 
 (defvar volume-amixer-current-channel volume-amixer-default-channel
   "The name of the ALSA mixer channel to manipulate.")
